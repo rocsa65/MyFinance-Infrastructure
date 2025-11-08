@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  jenkins:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: myfinance-jenkins
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "50000:50000"
+    volumes:
+      - jenkins_data:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./secrets:/var/jenkins_home/secrets
+      - ../pipelines:/var/jenkins_home/pipelines
+      - ../../scripts:/var/jenkins_home/scripts
+    environment:
+      - JENKINS_OPTS=--httpPort=8080
+      - JAVA_OPTS=-Djenkins.install.runSetupWizard=false
+    networks:
+      - jenkins-network
+
+  # Jenkins agent for running Docker commands
+  jenkins-agent:
+    image: jenkins/ssh-agent:latest
+    container_name: myfinance-jenkins-agent
+    restart: unless-stopped
+    environment:
+      - JENKINS_AGENT_SSH_PUBKEY=${JENKINS_AGENT_SSH_PUBKEY}
+    networks:
+      - jenkins-network
+
+volumes:
+  jenkins_data:
+    driver: local
+
+networks:
+  jenkins-network:
+    driver: bridge

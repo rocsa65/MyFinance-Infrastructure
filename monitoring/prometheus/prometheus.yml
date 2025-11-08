@@ -1,0 +1,85 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - "alert_rules.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+scrape_configs:
+  # MyFinance API monitoring
+  - job_name: 'myfinance-api-blue'
+    static_configs:
+      - targets: ['myfinance-api-blue:80']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+  - job_name: 'myfinance-api-green'
+    static_configs:
+      - targets: ['myfinance-api-green:80']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+  # MyFinance Client monitoring (nginx metrics)
+  - job_name: 'myfinance-client-blue'
+    static_configs:
+      - targets: ['myfinance-client-blue:80']
+    metrics_path: '/nginx_status'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+  - job_name: 'myfinance-client-green'
+    static_configs:
+      - targets: ['myfinance-client-green:80']
+    metrics_path: '/nginx_status'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+  # nginx Proxy monitoring
+  - job_name: 'nginx-proxy'
+    static_configs:
+      - targets: ['myfinance-nginx-proxy:80']
+    metrics_path: '/nginx_status'
+    scrape_interval: 30s
+
+  # Database monitoring
+  - job_name: 'postgres-blue'
+    static_configs:
+      - targets: ['postgres-exporter-blue:9187']
+    scrape_interval: 30s
+
+  - job_name: 'postgres-green'
+    static_configs:
+      - targets: ['postgres-exporter-green:9187']
+    scrape_interval: 30s
+
+  # Node exporter for system metrics
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 30s
+
+  # Docker container metrics
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    scrape_interval: 30s
+
+  # Jenkins monitoring
+  - job_name: 'jenkins'
+    static_configs:
+      - targets: ['jenkins:8080']
+    metrics_path: '/prometheus'
+    scrape_interval: 60s
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

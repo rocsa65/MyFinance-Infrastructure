@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  # Green Environment - Deployment Target
+  myfinance-api-green:
+    image: ${DOCKER_REGISTRY}/myfinance-api:${GREEN_RELEASE_NUMBER:-latest}
+    container_name: myfinance-api-green
+    restart: unless-stopped
+    ports:
+      - "5002:80"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING_GREEN}
+      - ASPNETCORE_URLS=http://+:80
+      - ENVIRONMENT_COLOR=green
+      - RELEASE_NUMBER=${GREEN_RELEASE_NUMBER}
+    volumes:
+      - green_api_data:/data
+      - green_api_logs:/app/logs
+    networks:
+      - myfinance-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      - myfinance-db-green
+
+  myfinance-client-green:
+    image: ${DOCKER_REGISTRY}/myfinance-client:${GREEN_RELEASE_NUMBER:-latest}
+    container_name: myfinance-client-green
+    restart: unless-stopped
+    ports:
+      - "3002:80"
+    environment:
+      - ENVIRONMENT_COLOR=green
+      - RELEASE_NUMBER=${GREEN_RELEASE_NUMBER}
+      - REACT_APP_API_URL=http://myfinance-api-green
+    networks:
+      - myfinance-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      - myfinance-api-green
+
+  myfinance-db-green:
+    image: postgres:15-alpine
+    container_name: myfinance-db-green
+    restart: unless-stopped
+    ports:
+      - "5434:5432"
+    environment:
+      - POSTGRES_DB=myfinance_green
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - green_db_data:/var/lib/postgresql/data
+      - green_db_logs:/var/log/postgresql
+    networks:
+      - myfinance-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d myfinance_green"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  green_api_data:
+    driver: local
+  green_api_logs:
+    driver: local
+  green_db_data:
+    driver: local
+  green_db_logs:
+    driver: local
+
+networks:
+  myfinance-network:
+    external: true

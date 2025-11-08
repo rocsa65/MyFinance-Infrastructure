@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  # Blue Environment - Currently Active
+  myfinance-api-blue:
+    image: ${DOCKER_REGISTRY}/myfinance-api:${BLUE_RELEASE_NUMBER:-latest}
+    container_name: myfinance-api-blue
+    restart: unless-stopped
+    ports:
+      - "5001:80"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
+      - ASPNETCORE_URLS=http://+:80
+      - ENVIRONMENT_COLOR=blue
+      - RELEASE_NUMBER=${BLUE_RELEASE_NUMBER}
+    volumes:
+      - blue_api_data:/data
+      - blue_api_logs:/app/logs
+    networks:
+      - myfinance-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      - myfinance-db-blue
+
+  myfinance-client-blue:
+    image: ${DOCKER_REGISTRY}/myfinance-client:${BLUE_RELEASE_NUMBER:-latest}
+    container_name: myfinance-client-blue
+    restart: unless-stopped
+    ports:
+      - "3001:80"
+    environment:
+      - ENVIRONMENT_COLOR=blue
+      - RELEASE_NUMBER=${BLUE_RELEASE_NUMBER}
+      - REACT_APP_API_URL=http://myfinance-api-blue
+    networks:
+      - myfinance-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      - myfinance-api-blue
+
+  myfinance-db-blue:
+    image: postgres:15-alpine
+    container_name: myfinance-db-blue
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      - POSTGRES_DB=myfinance_blue
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - blue_db_data:/var/lib/postgresql/data
+      - blue_db_logs:/var/log/postgresql
+    networks:
+      - myfinance-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d myfinance_blue"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  blue_api_data:
+    driver: local
+  blue_api_logs:
+    driver: local
+  blue_db_data:
+    driver: local
+  blue_db_logs:
+    driver: local
+
+networks:
+  myfinance-network:
+    external: true

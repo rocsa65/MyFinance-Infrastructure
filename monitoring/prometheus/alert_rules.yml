@@ -1,0 +1,127 @@
+groups:
+  - name: myfinance_alerts
+    rules:
+      # API Health Alerts
+      - alert: APIDown
+        expr: up{job=~"myfinance-api-.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MyFinance API is down"
+          description: "MyFinance API ({{ $labels.job }}) has been down for more than 1 minute."
+
+      - alert: APIHighErrorRate
+        expr: rate(http_requests_total{job=~"myfinance-api-.*",status=~"5.."}[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate on MyFinance API"
+          description: "MyFinance API ({{ $labels.job }}) has a high error rate: {{ $value }}."
+
+      # Database Alerts
+      - alert: DatabaseDown
+        expr: up{job=~"postgres-.*"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL database is down"
+          description: "PostgreSQL database ({{ $labels.job }}) has been down for more than 30 seconds."
+
+      - alert: DatabaseConnectionsHigh
+        expr: pg_stat_database_numbackends{job=~"postgres-.*"} > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High number of database connections"
+          description: "Database ({{ $labels.job }}) has {{ $value }} active connections."
+
+      # Frontend Alerts
+      - alert: FrontendDown
+        expr: up{job=~"myfinance-client-.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MyFinance frontend is down"
+          description: "MyFinance frontend ({{ $labels.job }}) has been down for more than 1 minute."
+
+      # nginx Proxy Alerts
+      - alert: NginxProxyDown
+        expr: up{job="nginx-proxy"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "nginx proxy is down"
+          description: "nginx proxy has been down for more than 30 seconds."
+
+      # System Resource Alerts
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is above 90% for more than 5 minutes."
+
+      - alert: HighCPUUsage
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is above 80% for more than 5 minutes."
+
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) < 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Low disk space"
+          description: "Disk space is below 10% for more than 5 minutes."
+
+      # Docker Container Alerts
+      - alert: ContainerDown
+        expr: up{job="cadvisor"} == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container monitoring is down"
+          description: "cAdvisor container monitoring has been down for more than 1 minute."
+
+      - alert: ContainerHighMemoryUsage
+        expr: (container_memory_usage_bytes{name=~"myfinance-.*"} / container_spec_memory_limit_bytes{name=~"myfinance-.*"}) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High container memory usage"
+          description: "Container {{ $labels.name }} memory usage is above 80%."
+
+      # Blue-Green Deployment Alerts
+      - alert: BlueGreenSwitchFailed
+        expr: increase(nginx_http_requests_total{status=~"5.."}[5m]) > 10
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Possible blue-green switch failure"
+          description: "High number of 5xx errors detected, possible blue-green switch issue."
+
+      # Release Pipeline Alerts
+      - alert: JenkinsDown
+        expr: up{job="jenkins"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Jenkins is down"
+          description: "Jenkins has been down for more than 2 minutes."
