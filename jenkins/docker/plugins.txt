@@ -4,12 +4,10 @@ docker-workflow
 pipeline-stage-view
 blueocean
 nodejs
-dotnet-sdk
 github
 github-branch-source
 pipeline-github-lib
 credentials-binding
-environment-injector
 build-timeout
 timestamper
 ws-cleanup
@@ -21,10 +19,7 @@ mailer
 slack
 prometheus
 influxdb
-grafana
 docker-build-step
-docker-compose-build-step
 pipeline-utility-steps
 http_request
-json-path
 mask-passwords

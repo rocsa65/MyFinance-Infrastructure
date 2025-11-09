@@ -36,8 +36,8 @@ git push origin production --tags
 #### Backend Pipeline (Parallel)
 ```bash
 # Jenkins executes automatically:
-git clone https://github.com/rocsa65/server.git --branch staging
-cd server
+git clone https://github.com/rocsa65/MyFinance.git --branch staging
+cd MyFinance
 dotnet restore
 dotnet test MyFinance.UnitTests/     # ✅ 23 tests pass
 dotnet test MyFinance.IntegrationTests/ # ✅ 12 tests pass

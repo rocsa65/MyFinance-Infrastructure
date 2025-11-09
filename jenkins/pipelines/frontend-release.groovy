@@ -107,10 +107,13 @@ pipeline {
             }
             steps {
                 script {
-                    withCredentials([usernamePassword(credentialsId: 'github-packages', usernameVariable: 'GITHUB_USER', passwordVariable: 'GITHUB_TOKEN')]) {
+                    // Authentication required for pushing images
+                    // Note: Pulling public packages doesn't require auth
+                    withCredentials([usernamePassword(credentialsId: 'github-token', usernameVariable: 'GITHUB_USER', passwordVariable: 'GITHUB_TOKEN')]) {
                         sh "echo ${GITHUB_TOKEN} | docker login ghcr.io -u ${GITHUB_USER} --password-stdin"
                         sh "docker push ${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:${env.RELEASE_NUMBER}"
                         sh "docker push ${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:latest"
+                        sh "docker logout ghcr.io"
                     }
                 }
             }

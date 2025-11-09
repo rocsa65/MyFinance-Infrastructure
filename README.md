@@ -32,6 +32,30 @@ MyFinance-Infrastructure/
 
 ## 🚀 Getting Started
 
+### 📚 Documentation Guide
+
+**Choose your path:**
+
+1. **🆕 New to Blue-Green Deployment?**
+   - Start here: [`GETTING-STARTED.md`](GETTING-STARTED.md)
+   - Learn manual deployment step-by-step
+   - Time: 30-60 minutes
+
+2. **🤖 Want Jenkins Automation?**
+   - Go here: [`JENKINS-SETUP.md`](JENKINS-SETUP.md)
+   - Set up automated CI/CD pipeline
+   - Time: 15 minutes setup
+
+3. **🤔 Not Sure Which to Use?**
+   - Read: [`JENKINS-VS-MANUAL.md`](JENKINS-VS-MANUAL.md)
+   - Compare manual vs automated deployment
+   - Decide which approach fits your needs
+
+4. **⚡ Quick Command Reference?**
+   - Check: [`QUICK-REFERENCE.md`](QUICK-REFERENCE.md)
+   - All commands in one place
+   - For experienced users
+
 ### Prerequisites
 
 - Docker Desktop

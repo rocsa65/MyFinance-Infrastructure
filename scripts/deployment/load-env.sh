@@ -37,9 +37,11 @@ mkdir -p "$PROJECT_ROOT/logs"
 
 # Set Docker registry credentials if available
 if [[ -n "$GITHUB_PACKAGES_TOKEN" && -n "$GITHUB_PACKAGES_USER" ]]; then
-    echo "Docker registry credentials available"
+    echo "Docker registry credentials available (for pushing images)"
     export DOCKER_REGISTRY_USER="$GITHUB_PACKAGES_USER"
     export DOCKER_REGISTRY_TOKEN="$GITHUB_PACKAGES_TOKEN"
+else
+    echo "Note: No registry credentials (OK for public packages)"
 fi
 
 # Validate required variables

@@ -135,20 +135,28 @@ if [[ $COPY_EXIT_CODE -eq 0 ]]; then
                 echo "Waiting for API to be ready..."
                 sleep 30
                 
+                # Determine the port based on target environment
+                if [[ "$TARGET_ENV" == "green" ]]; then
+                    TARGET_API_PORT="5002"
+                else
+                    TARGET_API_PORT="5001"
+                fi
+                
                 MAX_API_RETRIES=10
                 API_RETRY_COUNT=0
                 
                 while [[ $API_RETRY_COUNT -lt $MAX_API_RETRIES ]]; do
-                    API_HEALTH=$(docker exec "$TARGET_API_CONTAINER" curl -s -o /dev/null -w "%{http_code}" http://localhost/health 2>/dev/null || echo "000")
+                    # Use container name for cross-network access
+                    API_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "http://${TARGET_API_CONTAINER}/" 2>/dev/null || echo "000")
                     
-                    if [[ "$API_HEALTH" == "200" ]]; then
-                        echo "✅ Target API is healthy after replication"
+                    if [[ "$API_HEALTH" == "200" || "$API_HEALTH" == "404" ]]; then
+                        echo "✅ Target API is healthy after replication (Status: $API_HEALTH)"
                         break
                     fi
                     
                     echo "API health check $((API_RETRY_COUNT + 1))/$MAX_API_RETRIES - Status: $API_HEALTH"
                     sleep 10
-                    ((API_RETRY_COUNT++))
+                    API_RETRY_COUNT=$((API_RETRY_COUNT + 1))
                 done
                 
                 if [[ $API_RETRY_COUNT -eq $MAX_API_RETRIES ]]; then

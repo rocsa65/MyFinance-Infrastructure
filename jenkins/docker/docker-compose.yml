@@ -8,7 +8,7 @@ services:
     container_name: myfinance-jenkins
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8081:8080"  # Changed from 8080:8080 to avoid conflict
       - "50000:50000"
     volumes:
       - jenkins_data:/var/jenkins_home
@@ -16,11 +16,14 @@ services:
       - ./secrets:/var/jenkins_home/secrets
       - ../pipelines:/var/jenkins_home/pipelines
       - ../../scripts:/var/jenkins_home/scripts
+      - ../../environments:/var/jenkins_home/environments
+      - ../../docker:/var/jenkins_home/docker
     environment:
       - JENKINS_OPTS=--httpPort=8080
       - JAVA_OPTS=-Djenkins.install.runSetupWizard=false
     networks:
       - jenkins-network
+      - myfinance-network
 
   # Jenkins agent for running Docker commands
   jenkins-agent:
@@ -39,3 +42,5 @@ volumes:
 networks:
   jenkins-network:
     driver: bridge
+  myfinance-network:
+    external: true

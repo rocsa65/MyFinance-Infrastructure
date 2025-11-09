@@ -45,8 +45,22 @@ fi
 docker network create myfinance-network 2>/dev/null || true
 
 # Pull the latest image
+# Note: If packages are public, no authentication needed for pull
 echo "Pulling frontend image: ${DOCKER_REGISTRY}/myfinance-client:${RELEASE_NUMBER}"
-docker pull "${DOCKER_REGISTRY}/myfinance-client:${RELEASE_NUMBER}"
+
+# Try pulling without authentication first (for public packages)
+if ! docker pull "${DOCKER_REGISTRY}/myfinance-client:${RELEASE_NUMBER}" 2>/dev/null; then
+    echo "Pull without auth failed, attempting with credentials..."
+    # If pull fails and credentials are available, try with authentication
+    if [[ -n "$GITHUB_PACKAGES_TOKEN" && -n "$GITHUB_PACKAGES_USER" ]]; then
+        echo "$GITHUB_PACKAGES_TOKEN" | docker login ghcr.io -u "$GITHUB_PACKAGES_USER" --password-stdin
+        docker pull "${DOCKER_REGISTRY}/myfinance-client:${RELEASE_NUMBER}"
+    else
+        echo "❌ Error: Failed to pull image and no credentials available"
+        echo "Ensure packages are public or set GITHUB_PACKAGES_USER and GITHUB_PACKAGES_TOKEN"
+        exit 1
+    fi
+fi
 
 # Stop existing container if running
 if docker ps -q -f name="$CONTAINER_NAME" | grep -q .; then
@@ -63,18 +77,21 @@ docker-compose -f "$(basename "$COMPOSE_FILE")" up -d "$SERVICE_NAME"
 
 # Wait for container to be ready
 echo "Waiting for frontend to be ready..."
-sleep 30
+
+# Determine the port based on environment
+if [[ "$TARGET_ENV" == "green" ]]; then
+    CLIENT_PORT="3002"
+else
+    CLIENT_PORT="3001"
+fi
 
 # Health check
 MAX_RETRIES=30
 RETRY_COUNT=0
 
 while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
-    if [[ "$TARGET_ENV" == "green" ]]; then
-        HEALTH_CHECK=$(docker exec myfinance-client-green curl -s -o /dev/null -w "%{http_code}" http://localhost/ || echo "000")
-    else
-        HEALTH_CHECK=$(docker exec myfinance-client-blue curl -s -o /dev/null -w "%{http_code}" http://localhost/ || echo "000")
-    fi
+    # Check from host using exposed port
+    HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${CLIENT_PORT}/" 2>/dev/null || echo "000")
     
     if [[ "$HEALTH_CHECK" == "200" ]]; then
         echo "✅ Frontend deployed successfully to $TARGET_ENV environment"
@@ -90,7 +107,7 @@ while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
     
     echo "Health check attempt $((RETRY_COUNT + 1))/$MAX_RETRIES - Status: $HEALTH_CHECK"
     sleep 10
-    ((RETRY_COUNT++))
+    RETRY_COUNT=$((RETRY_COUNT + 1))
 done
 
 echo "❌ Frontend deployment to $TARGET_ENV failed - health check timeout"

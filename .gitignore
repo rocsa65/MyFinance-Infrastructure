@@ -58,6 +58,7 @@ node_modules/
 # Jenkins
 jenkins/data/
 jenkins/secrets/
+jenkins/docker/secrets/
 
 # Docker
 *.log
@@ -83,6 +84,7 @@ Thumbs.db
 
 # Backup files
 *.backup
+*.backup.*
 *.bak
 
 # Local environment files

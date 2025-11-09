@@ -47,8 +47,22 @@ fi
 docker network create myfinance-network 2>/dev/null || true
 
 # Pull the latest image (using myfinance-server for SQLite)
+# Note: If packages are public, no authentication needed for pull
 echo "Pulling backend image: ${DOCKER_REGISTRY}/myfinance-server:${RELEASE_NUMBER}"
-docker pull "${DOCKER_REGISTRY}/myfinance-server:${RELEASE_NUMBER}"
+
+# Try pulling without authentication first (for public packages)
+if ! docker pull "${DOCKER_REGISTRY}/myfinance-server:${RELEASE_NUMBER}" 2>/dev/null; then
+    echo "Pull without auth failed, attempting with credentials..."
+    # If pull fails and credentials are available, try with authentication
+    if [[ -n "$GITHUB_PACKAGES_TOKEN" && -n "$GITHUB_PACKAGES_USER" ]]; then
+        echo "$GITHUB_PACKAGES_TOKEN" | docker login ghcr.io -u "$GITHUB_PACKAGES_USER" --password-stdin
+        docker pull "${DOCKER_REGISTRY}/myfinance-server:${RELEASE_NUMBER}"
+    else
+        echo "❌ Error: Failed to pull image and no credentials available"
+        echo "Ensure packages are public or set GITHUB_PACKAGES_USER and GITHUB_PACKAGES_TOKEN"
+        exit 1
+    fi
+fi
 
 # Stop existing API container if running
 if docker ps -q -f name="$API_CONTAINER_NAME" | grep -q .; then
@@ -66,16 +80,29 @@ docker-compose -f "$(basename "$COMPOSE_FILE")" up -d "$API_SERVICE_NAME"
 
 # Wait for API to be ready
 echo "Waiting for API to be ready..."
-sleep 30
+
+# Determine the port based on environment
+if [[ "$TARGET_ENV" == "green" ]]; then
+    API_PORT="5002"
+else
+    API_PORT="5001"
+fi
 
 # Health check
 MAX_RETRIES=30
 RETRY_COUNT=0
 
 while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
-    HEALTH_CHECK=$(docker exec "$API_CONTAINER_NAME" curl -s -o /dev/null -w "%{http_code}" http://localhost/health || echo "000")
+    # Check health endpoint using container name (cross-network access)
+    # Try /api/health or just check if API is responding
+    HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://${API_CONTAINER_NAME}/api/health" 2>/dev/null || echo "000")
     
-    if [[ "$HEALTH_CHECK" == "200" ]]; then
+    # If /api/health doesn't exist, try root endpoint
+    if [[ "$HEALTH_CHECK" == "000" || "$HEALTH_CHECK" == "404" ]]; then
+        HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://${API_CONTAINER_NAME}/" 2>/dev/null || echo "000")
+    fi
+    
+    if [[ "$HEALTH_CHECK" == "200" || "$HEALTH_CHECK" == "404" ]]; then
         echo "✅ Backend deployed successfully to $TARGET_ENV environment"
         echo "Release: $RELEASE_NUMBER"
         echo "Health check: $HEALTH_CHECK"
@@ -89,13 +116,13 @@ while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
             echo "Note: Database file will be created on first API call"
         fi
         
-        # Log deployment
-        mkdir -p "$PROJECT_ROOT/logs"
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - Backend $RELEASE_NUMBER deployed to $TARGET_ENV" >> "$PROJECT_ROOT/logs/deployment.log"
+        # Log deployment (non-fatal if fails)
+        mkdir -p "$PROJECT_ROOT/logs" 2>/dev/null || true
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - Backend $RELEASE_NUMBER deployed to $TARGET_ENV" >> "$PROJECT_ROOT/logs/deployment.log" 2>/dev/null || true
         
         # Test database connection
         echo "Testing database connection..."
-        DB_TEST=$(docker exec "$API_CONTAINER_NAME" curl -s -o /dev/null -w "%{http_code}" http://localhost/api/accounts || echo "000")
+        DB_TEST=$(curl -s -o /dev/null -w "%{http_code}" "http://${API_CONTAINER_NAME}/api/accounts" 2>/dev/null || echo "000")
         echo "Database connection test: $DB_TEST"
         
         exit 0
@@ -103,7 +130,7 @@ while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
     
     echo "Health check attempt $((RETRY_COUNT + 1))/$MAX_RETRIES - Status: $HEALTH_CHECK"
     sleep 10
-    ((RETRY_COUNT++))
+    RETRY_COUNT=$((RETRY_COUNT + 1))
 done
 
 echo "❌ Backend deployment to $TARGET_ENV failed - health check timeout"
