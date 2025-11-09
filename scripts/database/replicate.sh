@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Database Replication Script
-# This script replicates data from blue to green environment (or vice versa)
+# Database Replication Script for SQLite
+# This script replicates SQLite database from blue to green environment (or vice versa)
 
 set -e
 
@@ -33,171 +33,152 @@ if [[ "$SOURCE_ENV" != "blue" && "$SOURCE_ENV" != "green" ]] || [[ "$TARGET_ENV"
     exit 1
 fi
 
-echo "Replicating database from $SOURCE_ENV to $TARGET_ENV environment..."
+echo "Replicating SQLite database from $SOURCE_ENV to $TARGET_ENV environment..."
 
 # Set environment-specific variables
-SOURCE_DB_CONTAINER="myfinance-db-$SOURCE_ENV"
-TARGET_DB_CONTAINER="myfinance-db-$TARGET_ENV"
-SOURCE_DB_NAME="myfinance_$SOURCE_ENV"
-TARGET_DB_NAME="myfinance_$TARGET_ENV"
+SOURCE_API_CONTAINER="myfinance-api-$SOURCE_ENV"
+TARGET_API_CONTAINER="myfinance-api-$TARGET_ENV"
+SOURCE_DB_FILE="finance_$SOURCE_ENV.db"
+TARGET_DB_FILE="finance_$TARGET_ENV.db"
 
 # Source environment configuration
 source "$SCRIPT_DIR/../deployment/load-env.sh" production
 
 # Check if source container is running
-if ! docker ps -q -f name="$SOURCE_DB_CONTAINER" | grep -q .; then
-    echo "Error: Source database container '$SOURCE_DB_CONTAINER' is not running"
+if ! docker ps -q -f name="$SOURCE_API_CONTAINER" | grep -q .; then
+    echo "Error: Source API container '$SOURCE_API_CONTAINER' is not running"
     exit 1
 fi
 
 # Check if target container is running
-if ! docker ps -q -f name="$TARGET_DB_CONTAINER" | grep -q .; then
-    echo "Error: Target database container '$TARGET_DB_CONTAINER' is not running"
+if ! docker ps -q -f name="$TARGET_API_CONTAINER" | grep -q .; then
+    echo "Error: Target API container '$TARGET_API_CONTAINER' is not running"
     exit 1
 fi
 
 # Create backup directory
 mkdir -p "$PROJECT_ROOT/backup"
 
-# Wait for both databases to be ready
-echo "Checking database readiness..."
-for container in "$SOURCE_DB_CONTAINER" "$TARGET_DB_CONTAINER"; do
-    MAX_RETRIES=30
-    RETRY_COUNT=0
-    
-    while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
-        if [[ "$container" == *"blue"* ]]; then
-            DB_NAME="myfinance_blue"
-        else
-            DB_NAME="myfinance_green"
-        fi
-        
-        if docker exec "$container" pg_isready -U "${DB_USER}" -d "$DB_NAME" >/dev/null 2>&1; then
-            echo "✅ $container is ready"
-            break
-        fi
-        
-        echo "Waiting for $container - attempt $((RETRY_COUNT + 1))/$MAX_RETRIES"
-        sleep 5
-        ((RETRY_COUNT++))
-    done
-    
-    if [[ $RETRY_COUNT -eq $MAX_RETRIES ]]; then
-        echo "❌ $container is not ready"
-        exit 1
-    fi
-done
-
-# Create backup of target database
-echo "Creating backup of target database ($TARGET_ENV)..."
-TARGET_BACKUP_FILE="$PROJECT_ROOT/backup/pre-replication-$TARGET_ENV-$(date +%Y%m%d-%H%M%S).sql"
-docker exec "$TARGET_DB_CONTAINER" pg_dump -U "${DB_USER}" -d "$TARGET_DB_NAME" > "$TARGET_BACKUP_FILE" 2>/dev/null || {
-    echo "Warning: Could not backup target database"
-}
-
-# Create dump of source database
-echo "Creating dump of source database ($SOURCE_ENV)..."
-DUMP_FILE="$PROJECT_ROOT/backup/replication-$SOURCE_ENV-to-$TARGET_ENV-$(date +%Y%m%d-%H%M%S).sql"
-docker exec "$SOURCE_DB_CONTAINER" pg_dump -U "${DB_USER}" -d "$SOURCE_DB_NAME" > "$DUMP_FILE"
-
-if [[ ! -f "$DUMP_FILE" || ! -s "$DUMP_FILE" ]]; then
-    echo "❌ Failed to create database dump"
+# Check if source database file exists
+echo "Checking source database..."
+if ! docker exec "$SOURCE_API_CONTAINER" test -f "/data/$SOURCE_DB_FILE" 2>/dev/null; then
+    echo "Error: Source database file '/data/$SOURCE_DB_FILE' does not exist in container '$SOURCE_API_CONTAINER'"
     exit 1
 fi
 
-echo "✅ Source database dump created: $(basename "$DUMP_FILE")"
+echo "✅ Source database found"
 
-# Stop target API to prevent connections during restoration
-TARGET_API_CONTAINER="myfinance-api-$TARGET_ENV"
-API_WAS_RUNNING=false
-
-if docker ps -q -f name="$TARGET_API_CONTAINER" | grep -q .; then
-    echo "Stopping target API container for safe restoration..."
-    docker stop "$TARGET_API_CONTAINER"
-    API_WAS_RUNNING=true
+# Create backup of target database if it exists
+echo "Creating backup of target database ($TARGET_ENV)..."
+TARGET_BACKUP_FILE="$PROJECT_ROOT/backup/pre-replication-$TARGET_ENV-$(date +%Y%m%d-%H%M%S).db"
+if docker exec "$TARGET_API_CONTAINER" test -f "/data/$TARGET_DB_FILE" 2>/dev/null; then
+    docker cp "$TARGET_API_CONTAINER:/data/$TARGET_DB_FILE" "$TARGET_BACKUP_FILE" 2>/dev/null || {
+        echo "Warning: Could not backup target database"
+    }
+    echo "✅ Target database backup created"
+else
+    echo "No existing target database to backup"
 fi
 
-# Drop and recreate target database
-echo "Recreating target database ($TARGET_ENV)..."
-docker exec "$TARGET_DB_CONTAINER" psql -U "${DB_USER}" -d postgres -c "DROP DATABASE IF EXISTS $TARGET_DB_NAME;"
-docker exec "$TARGET_DB_CONTAINER" psql -U "${DB_USER}" -d postgres -c "CREATE DATABASE $TARGET_DB_NAME OWNER ${DB_USER};"
+# Stop target API to prevent database locks during copy
+TARGET_API_WAS_RUNNING=false
+if docker ps -q -f name="$TARGET_API_CONTAINER" | grep -q .; then
+    echo "Stopping target API container for safe database replication..."
+    docker stop "$TARGET_API_CONTAINER"
+    TARGET_API_WAS_RUNNING=true
+    sleep 5
+fi
 
-# Restore dump to target database
-echo "Restoring data to target database ($TARGET_ENV)..."
-docker exec -i "$TARGET_DB_CONTAINER" psql -U "${DB_USER}" -d "$TARGET_DB_NAME" < "$DUMP_FILE"
-RESTORE_EXIT_CODE=$?
+# Copy source database file to local backup directory
+echo "Copying source database ($SOURCE_ENV)..."
+TEMP_DB_FILE="$PROJECT_ROOT/backup/replication-$SOURCE_ENV-to-$TARGET_ENV-$(date +%Y%m%d-%H%M%S).db"
+docker cp "$SOURCE_API_CONTAINER:/data/$SOURCE_DB_FILE" "$TEMP_DB_FILE"
 
-if [[ $RESTORE_EXIT_CODE -eq 0 ]]; then
+if [[ ! -f "$TEMP_DB_FILE" || ! -s "$TEMP_DB_FILE" ]]; then
+    echo "❌ Failed to copy source database"
+    if [[ "$TARGET_API_WAS_RUNNING" == "true" ]]; then
+        docker start "$TARGET_API_CONTAINER"
+    fi
+    exit 1
+fi
+
+echo "✅ Source database copied: $(basename "$TEMP_DB_FILE")"
+
+# Copy database to target container
+echo "Copying database to target environment ($TARGET_ENV)..."
+docker cp "$TEMP_DB_FILE" "$TARGET_API_CONTAINER:/data/$TARGET_DB_FILE"
+COPY_EXIT_CODE=$?
+
+if [[ $COPY_EXIT_CODE -eq 0 ]]; then
     echo "✅ Database replication completed successfully"
     
-    # Verify restoration
-    echo "Verifying data replication..."
+    # Verify database file in target container
+    echo "Verifying database replication..."
     
-    SOURCE_COUNT=$(docker exec "$SOURCE_DB_CONTAINER" psql -U "${DB_USER}" -d "$SOURCE_DB_NAME" -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';" | tr -d ' \n')
-    TARGET_COUNT=$(docker exec "$TARGET_DB_CONTAINER" psql -U "${DB_USER}" -d "$TARGET_DB_NAME" -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';" | tr -d ' \n')
-    
-    echo "Source tables: $SOURCE_COUNT"
-    echo "Target tables: $TARGET_COUNT"
-    
-    if [[ "$SOURCE_COUNT" == "$TARGET_COUNT" && "$SOURCE_COUNT" != "0" ]]; then
-        echo "✅ Data replication verification passed"
+    if docker exec "$TARGET_API_CONTAINER" test -f "/data/$TARGET_DB_FILE" 2>/dev/null; then
+        TARGET_DB_SIZE=$(docker exec "$TARGET_API_CONTAINER" stat -c%s "/data/$TARGET_DB_FILE" 2>/dev/null || echo "0")
+        echo "Target database size: $TARGET_DB_SIZE bytes"
         
-        # Log replication
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - Database replicated from $SOURCE_ENV to $TARGET_ENV" >> "$PROJECT_ROOT/logs/replication.log"
-        
-        # Restart target API if it was running
-        if [[ "$API_WAS_RUNNING" == "true" ]]; then
-            echo "Restarting target API container..."
-            docker start "$TARGET_API_CONTAINER"
+        if [[ "$TARGET_DB_SIZE" -gt "0" ]]; then
+            echo "✅ Database replication verification passed"
             
-            # Wait for API to be ready
-            echo "Waiting for API to be ready..."
-            sleep 30
+            # Log replication
+            mkdir -p "$PROJECT_ROOT/logs"
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - SQLite database replicated from $SOURCE_ENV to $TARGET_ENV" >> "$PROJECT_ROOT/logs/replication.log"
             
-            MAX_API_RETRIES=10
-            API_RETRY_COUNT=0
-            
-            while [[ $API_RETRY_COUNT -lt $MAX_API_RETRIES ]]; do
-                API_HEALTH=$(docker exec "$TARGET_API_CONTAINER" curl -s -o /dev/null -w "%{http_code}" http://localhost/health 2>/dev/null || echo "000")
+            # Restart target API
+            if [[ "$TARGET_API_WAS_RUNNING" == "true" ]]; then
+                echo "Restarting target API container..."
+                docker start "$TARGET_API_CONTAINER"
                 
-                if [[ "$API_HEALTH" == "200" ]]; then
-                    echo "✅ Target API is healthy after replication"
-                    break
+                # Wait for API to be ready
+                echo "Waiting for API to be ready..."
+                sleep 30
+                
+                MAX_API_RETRIES=10
+                API_RETRY_COUNT=0
+                
+                while [[ $API_RETRY_COUNT -lt $MAX_API_RETRIES ]]; do
+                    API_HEALTH=$(docker exec "$TARGET_API_CONTAINER" curl -s -o /dev/null -w "%{http_code}" http://localhost/health 2>/dev/null || echo "000")
+                    
+                    if [[ "$API_HEALTH" == "200" ]]; then
+                        echo "✅ Target API is healthy after replication"
+                        break
+                    fi
+                    
+                    echo "API health check $((API_RETRY_COUNT + 1))/$MAX_API_RETRIES - Status: $API_HEALTH"
+                    sleep 10
+                    ((API_RETRY_COUNT++))
+                done
+                
+                if [[ $API_RETRY_COUNT -eq $MAX_API_RETRIES ]]; then
+                    echo "⚠️  Target API may not be healthy after replication"
                 fi
-                
-                echo "API health check $((API_RETRY_COUNT + 1))/$MAX_API_RETRIES - Status: $API_HEALTH"
-                sleep 10
-                ((API_RETRY_COUNT++))
-            done
-            
-            if [[ $API_RETRY_COUNT -eq $MAX_API_RETRIES ]]; then
-                echo "⚠️  Target API may not be healthy after replication"
             fi
+            
+            # Clean up temporary database file
+            rm -f "$TEMP_DB_FILE"
+            
+            exit 0
+        else
+            echo "❌ Database replication verification failed - file is empty"
         fi
-        
-        # Clean up old dump file (keep backup)
-        rm -f "$DUMP_FILE"
-        
-        exit 0
     else
-        echo "❌ Data replication verification failed"
-        echo "Table counts don't match or are zero"
+        echo "❌ Database file not found in target container"
     fi
 else
-    echo "❌ Database restoration failed"
+    echo "❌ Database copy to target failed"
     
-    # Attempt to restore target backup
+    # Attempt to restore target backup if available
     if [[ -f "$TARGET_BACKUP_FILE" ]]; then
         echo "Attempting to restore target database backup..."
-        docker exec "$TARGET_DB_CONTAINER" psql -U "${DB_USER}" -d postgres -c "DROP DATABASE IF EXISTS $TARGET_DB_NAME;"
-        docker exec "$TARGET_DB_CONTAINER" psql -U "${DB_USER}" -d postgres -c "CREATE DATABASE $TARGET_DB_NAME OWNER ${DB_USER};"
-        docker exec -i "$TARGET_DB_CONTAINER" psql -U "${DB_USER}" -d "$TARGET_DB_NAME" < "$TARGET_BACKUP_FILE"
+        docker cp "$TARGET_BACKUP_FILE" "$TARGET_API_CONTAINER:/data/$TARGET_DB_FILE"
         echo "Target database backup restored"
     fi
 fi
 
 # Restart target API if it was running
-if [[ "$API_WAS_RUNNING" == "true" ]]; then
+if [[ "$TARGET_API_WAS_RUNNING" == "true" ]]; then
     echo "Restarting target API container..."
     docker start "$TARGET_API_CONTAINER"
 fi

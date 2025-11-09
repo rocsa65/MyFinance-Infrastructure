@@ -78,33 +78,9 @@ services:
     networks:
       - myfinance-network
 
-  # Postgres Exporter for Blue Database
-  postgres-exporter-blue:
-    image: prometheuscommunity/postgres-exporter:latest
-    container_name: myfinance-postgres-exporter-blue
-    restart: unless-stopped
-    ports:
-      - "9187:9187"
-    environment:
-      - DATA_SOURCE_NAME=postgresql://${DB_USER}:${DB_PASSWORD}@myfinance-db-blue:5432/myfinance_blue?sslmode=disable
-    networks:
-      - myfinance-network
-    depends_on:
-      - prometheus
-
-  # Postgres Exporter for Green Database  
-  postgres-exporter-green:
-    image: prometheuscommunity/postgres-exporter:latest
-    container_name: myfinance-postgres-exporter-green
-    restart: unless-stopped
-    ports:
-      - "9188:9187"
-    environment:
-      - DATA_SOURCE_NAME=postgresql://${DB_USER}:${DB_PASSWORD}@myfinance-db-green:5432/myfinance_green?sslmode=disable
-    networks:
-      - myfinance-network
-    depends_on:
-      - prometheus
+  # Note: SQLite monitoring is done through application metrics
+  # SQLite databases are file-based and embedded in the API containers
+  # Database file monitoring is handled by the API's health endpoints
 
 volumes:
   prometheus_data:

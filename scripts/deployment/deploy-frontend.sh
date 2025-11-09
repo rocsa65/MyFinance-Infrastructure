@@ -82,6 +82,7 @@ while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
         echo "Health check: $HEALTH_CHECK"
         
         # Log deployment
+        mkdir -p "$PROJECT_ROOT/logs"
         echo "$(date '+%Y-%m-%d %H:%M:%S') - Frontend $RELEASE_NUMBER deployed to $TARGET_ENV" >> "$PROJECT_ROOT/logs/deployment.log"
         
         exit 0

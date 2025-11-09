@@ -49,16 +49,9 @@ scrape_configs:
     metrics_path: '/nginx_status'
     scrape_interval: 30s
 
-  # Database monitoring
-  - job_name: 'postgres-blue'
-    static_configs:
-      - targets: ['postgres-exporter-blue:9187']
-    scrape_interval: 30s
-
-  - job_name: 'postgres-green'
-    static_configs:
-      - targets: ['postgres-exporter-green:9187']
-    scrape_interval: 30s
+  # Note: SQLite database monitoring
+  # SQLite databases are embedded in the API containers
+  # Database metrics are exposed through API health endpoints
 
   # Node exporter for system metrics
   - job_name: 'node-exporter'

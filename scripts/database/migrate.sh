@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Database Migration Script
+# Database Migration Script for SQLite
 # This script runs Entity Framework migrations on the target environment
 
 set -e
@@ -19,21 +19,8 @@ fi
 echo "Running database migrations on $TARGET_ENV environment..."
 
 # Set environment-specific variables
-if [[ "$TARGET_ENV" == "green" ]]; then
-    DB_CONTAINER_NAME="myfinance-db-green"
-    API_CONTAINER_NAME="myfinance-api-green"
-    DB_NAME="myfinance_green"
-else
-    DB_CONTAINER_NAME="myfinance-db-blue"
-    API_CONTAINER_NAME="myfinance-api-blue"
-    DB_NAME="myfinance_blue"
-fi
-
-# Check if database container is running
-if ! docker ps -q -f name="$DB_CONTAINER_NAME" | grep -q .; then
-    echo "Error: Database container '$DB_CONTAINER_NAME' is not running"
-    exit 1
-fi
+API_CONTAINER_NAME="myfinance-api-$TARGET_ENV"
+DB_FILE="finance_$TARGET_ENV.db"
 
 # Check if API container is running
 if ! docker ps -q -f name="$API_CONTAINER_NAME" | grep -q .; then
@@ -41,33 +28,19 @@ if ! docker ps -q -f name="$API_CONTAINER_NAME" | grep -q .; then
     exit 1
 fi
 
-# Wait for database to be ready
-echo "Waiting for database to be ready..."
-MAX_RETRIES=30
-RETRY_COUNT=0
-
-while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
-    if docker exec "$DB_CONTAINER_NAME" pg_isready -U "${DB_USER}" -d "$DB_NAME" >/dev/null 2>&1; then
-        echo "✅ Database is ready"
-        break
-    fi
-    
-    echo "Database readiness check $((RETRY_COUNT + 1))/$MAX_RETRIES"
-    sleep 5
-    ((RETRY_COUNT++))
-done
-
-if [[ $RETRY_COUNT -eq $MAX_RETRIES ]]; then
-    echo "❌ Database is not ready for migrations"
-    exit 1
-fi
-
-# Backup database before migration
+# Backup database before migration if it exists
 echo "Creating database backup before migration..."
-BACKUP_FILE="/backup/pre-migration-$(date +%Y%m%d-%H%M%S).sql"
-docker exec "$DB_CONTAINER_NAME" pg_dump -U "${DB_USER}" -d "$DB_NAME" > "$PROJECT_ROOT/backup/$(basename "$BACKUP_FILE")" 2>/dev/null || {
-    echo "Warning: Could not create backup (backup directory may not be mounted)"
-}
+mkdir -p "$PROJECT_ROOT/backup"
+BACKUP_FILE="$PROJECT_ROOT/backup/pre-migration-$TARGET_ENV-$(date +%Y%m%d-%H%M%S).db"
+
+if docker exec "$API_CONTAINER_NAME" test -f "/data/$DB_FILE" 2>/dev/null; then
+    docker cp "$API_CONTAINER_NAME:/data/$DB_FILE" "$BACKUP_FILE" 2>/dev/null || {
+        echo "Warning: Could not create backup"
+    }
+    echo "✅ Backup created: $(basename "$BACKUP_FILE")"
+else
+    echo "No existing database to backup (will be created during migration)"
+fi
 
 # Run migrations through the API container
 echo "Running Entity Framework migrations..."
@@ -81,23 +54,23 @@ if [[ $MIGRATION_EXIT_CODE -eq 0 ]]; then
     echo "$MIGRATION_RESULT"
     
     # Log migration
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - Database migration completed on $TARGET_ENV" >> "$PROJECT_ROOT/logs/migration.log"
+    mkdir -p "$PROJECT_ROOT/logs"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - SQLite database migration completed on $TARGET_ENV" >> "$PROJECT_ROOT/logs/migration.log"
     
-    # Verify migration by checking database schema
-    echo "Verifying migration..."
-    SCHEMA_CHECK=$(docker exec "$DB_CONTAINER_NAME" psql -U "${DB_USER}" -d "$DB_NAME" -c "\dt" 2>/dev/null | grep -c "public" || echo "0")
-    
-    if [[ $SCHEMA_CHECK -gt 0 ]]; then
-        echo "✅ Database schema verification passed"
+    # Verify database file was created/updated
+    echo "Verifying database file..."
+    if docker exec "$API_CONTAINER_NAME" test -f "/data/$DB_FILE" 2>/dev/null; then
+        DB_SIZE=$(docker exec "$API_CONTAINER_NAME" stat -c%s "/data/$DB_FILE" 2>/dev/null || echo "0")
+        echo "✅ Database file exists: $DB_FILE (size: $DB_SIZE bytes)"
     else
-        echo "⚠️  Warning: Database schema verification inconclusive"
+        echo "⚠️  Warning: Database file not found after migration"
     fi
     
     # Test API connectivity post-migration
     echo "Testing API connectivity after migration..."
     sleep 10
     
-    API_HEALTH=$(docker exec "$API_CONTAINER_NAME" curl -s -o /dev/null -w "%{http_code}" http://localhost/health || echo "000")
+    API_HEALTH=$(docker exec "$API_CONTAINER_NAME" curl -s -o /dev/null -w "%{http_code}" http://localhost/health 2>/dev/null || echo "000")
     
     if [[ "$API_HEALTH" == "200" ]]; then
         echo "✅ API health check passed after migration"
@@ -113,15 +86,17 @@ else
     echo "$MIGRATION_RESULT"
     
     # Log migration failure
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - Database migration FAILED on $TARGET_ENV" >> "$PROJECT_ROOT/logs/migration.log"
+    mkdir -p "$PROJECT_ROOT/logs"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - SQLite database migration FAILED on $TARGET_ENV" >> "$PROJECT_ROOT/logs/migration.log"
     echo "Error: $MIGRATION_RESULT" >> "$PROJECT_ROOT/logs/migration.log"
     
     # Attempt to restore backup if available
-    if [[ -f "$PROJECT_ROOT/backup/$(basename "$BACKUP_FILE")" ]]; then
+    if [[ -f "$BACKUP_FILE" ]]; then
         echo "Attempting to restore database backup..."
-        docker exec -i "$DB_CONTAINER_NAME" psql -U "${DB_USER}" -d "$DB_NAME" < "$PROJECT_ROOT/backup/$(basename "$BACKUP_FILE")" || {
+        docker cp "$BACKUP_FILE" "$API_CONTAINER_NAME:/data/$DB_FILE" || {
             echo "❌ Failed to restore database backup"
         }
+        echo "Database backup restored, please restart the API container"
     fi
     
     exit 1

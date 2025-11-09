@@ -20,24 +20,17 @@ groups:
           summary: "High error rate on MyFinance API"
           description: "MyFinance API ({{ $labels.job }}) has a high error rate: {{ $value }}."
 
-      # Database Alerts
-      - alert: DatabaseDown
-        expr: up{job=~"postgres-.*"} == 0
+      # Database Alerts (SQLite)
+      # Note: SQLite databases are file-based and embedded in API containers
+      # Database health is monitored through API health endpoints
+      - alert: APIHealthCheckFailed
+        expr: up{job=~"myfinance-api-.*"} == 0 or probe_success{job=~"myfinance-api-.*"} == 0
         for: 30s
         labels:
           severity: critical
         annotations:
-          summary: "PostgreSQL database is down"
-          description: "PostgreSQL database ({{ $labels.job }}) has been down for more than 30 seconds."
-
-      - alert: DatabaseConnectionsHigh
-        expr: pg_stat_database_numbackends{job=~"postgres-.*"} > 80
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "High number of database connections"
-          description: "Database ({{ $labels.job }}) has {{ $value }} active connections."
+          summary: "API health check failed (SQLite database may be unavailable)"
+          description: "MyFinance API ({{ $labels.job }}) health check failed. SQLite database may be inaccessible."
 
       # Frontend Alerts
       - alert: FrontendDown

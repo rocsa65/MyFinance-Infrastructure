@@ -108,8 +108,13 @@ if [[ "$API_HEALTH" == "200" && "$CLIENT_HEALTH" == "200" ]]; then
     # Log success
     echo "$(date '+%Y-%m-%d %H:%M:%S') - EMERGENCY ROLLBACK to $ROLLBACK_TARGET SUCCESSFUL" >> "$PROJECT_ROOT/logs/rollback.log"
     
-    # Send notification
-    "$SCRIPT_DIR/../monitoring/notify-rollback.sh" "$ROLLBACK_TARGET" "SUCCESS"
+    # Send notification if script exists
+    if [[ -f "$SCRIPT_DIR/../monitoring/notify-rollback.sh" ]]; then
+        "$SCRIPT_DIR/../monitoring/notify-rollback.sh" "$ROLLBACK_TARGET" "SUCCESS" 2>/dev/null || \
+            echo "Note: Notification script executed but may have failed"
+    else
+        echo "Note: Notification script not found, skipping notification"
+    fi
     
     exit 0
 else
@@ -120,8 +125,13 @@ else
     # Log failure
     echo "$(date '+%Y-%m-%d %H:%M:%S') - EMERGENCY ROLLBACK to $ROLLBACK_TARGET FAILED" >> "$PROJECT_ROOT/logs/rollback.log"
     
-    # Send critical notification
-    "$SCRIPT_DIR/../monitoring/notify-rollback.sh" "$ROLLBACK_TARGET" "FAILED"
+    # Send critical notification if script exists
+    if [[ -f "$SCRIPT_DIR/../monitoring/notify-rollback.sh" ]]; then
+        "$SCRIPT_DIR/../monitoring/notify-rollback.sh" "$ROLLBACK_TARGET" "FAILED" 2>/dev/null || \
+            echo "Note: Notification script executed but may have failed"
+    else
+        echo "Note: Notification script not found, skipping notification"
+    fi
     
     # Try to restore backup
     echo "Attempting to restore backup configuration..."

@@ -28,73 +28,40 @@ fi
 
 echo "Deploying backend to $TARGET_ENV environment with release $RELEASE_NUMBER..."
 
-# Set environment-specific variables
+# Set environment-specific variables for SQLite
 if [[ "$TARGET_ENV" == "green" ]]; then
     export GREEN_RELEASE_NUMBER="$RELEASE_NUMBER"
     COMPOSE_FILE="$PROJECT_ROOT/docker/blue-green/docker-compose.green.yml"
     API_CONTAINER_NAME="myfinance-api-green"
-    DB_CONTAINER_NAME="myfinance-db-green"
-    DB_PORT="5434"
     API_SERVICE_NAME="myfinance-api-green"
-    DB_SERVICE_NAME="myfinance-db-green"
-    export DB_CONNECTION_STRING_GREEN="Server=myfinance-db-green;Database=myfinance_green;User Id=${DB_USER};Password=${DB_PASSWORD};"
+    DB_FILE="finance_green.db"
 else
     export BLUE_RELEASE_NUMBER="$RELEASE_NUMBER"
     COMPOSE_FILE="$PROJECT_ROOT/docker/blue-green/docker-compose.blue.yml"
     API_CONTAINER_NAME="myfinance-api-blue"
-    DB_CONTAINER_NAME="myfinance-db-blue"
-    DB_PORT="5433"
     API_SERVICE_NAME="myfinance-api-blue"
-    DB_SERVICE_NAME="myfinance-db-blue"
-    export DB_CONNECTION_STRING="${DB_CONNECTION_STRING:-Server=myfinance-db-blue;Database=myfinance_blue;User Id=${DB_USER};Password=${DB_PASSWORD};}"
+    DB_FILE="finance_blue.db"
 fi
 
 # Create network if it doesn't exist
 docker network create myfinance-network 2>/dev/null || true
 
-# Pull the latest image
-echo "Pulling backend image: ${DOCKER_REGISTRY}/myfinance-api:${RELEASE_NUMBER}"
-docker pull "${DOCKER_REGISTRY}/myfinance-api:${RELEASE_NUMBER}"
+# Pull the latest image (using myfinance-server for SQLite)
+echo "Pulling backend image: ${DOCKER_REGISTRY}/myfinance-server:${RELEASE_NUMBER}"
+docker pull "${DOCKER_REGISTRY}/myfinance-server:${RELEASE_NUMBER}"
 
-# Stop existing containers if running
-for container in "$API_CONTAINER_NAME" "$DB_CONTAINER_NAME"; do
-    if docker ps -q -f name="$container" | grep -q .; then
-        echo "Stopping existing $container container..."
-        docker stop "$container"
-        docker rm "$container"
-    fi
-done
-
-# Deploy to target environment
-echo "Starting backend services in $TARGET_ENV environment..."
-cd "$PROJECT_ROOT/docker/blue-green"
-
-# Start database first
-docker-compose -f "$(basename "$COMPOSE_FILE")" up -d "$DB_SERVICE_NAME"
-
-# Wait for database to be ready
-echo "Waiting for database to be ready..."
-MAX_DB_RETRIES=30
-DB_RETRY_COUNT=0
-
-while [[ $DB_RETRY_COUNT -lt $MAX_DB_RETRIES ]]; do
-    if docker exec "$DB_CONTAINER_NAME" pg_isready -U "$DB_USER" -d "myfinance_${TARGET_ENV}" >/dev/null 2>&1; then
-        echo "✅ Database is ready"
-        break
-    fi
-    
-    echo "Database check attempt $((DB_RETRY_COUNT + 1))/$MAX_DB_RETRIES"
-    sleep 5
-    ((DB_RETRY_COUNT++))
-done
-
-if [[ $DB_RETRY_COUNT -eq $MAX_DB_RETRIES ]]; then
-    echo "❌ Database failed to start in $TARGET_ENV environment"
-    docker logs --tail 50 "$DB_CONTAINER_NAME"
-    exit 1
+# Stop existing API container if running
+if docker ps -q -f name="$API_CONTAINER_NAME" | grep -q .; then
+    echo "Stopping existing $API_CONTAINER_NAME container..."
+    docker stop "$API_CONTAINER_NAME"
+    docker rm "$API_CONTAINER_NAME"
 fi
 
-# Start API service
+# Deploy to target environment
+echo "Starting backend API in $TARGET_ENV environment..."
+cd "$PROJECT_ROOT/docker/blue-green"
+
+# Start API service (SQLite database is embedded, no separate DB service)
 docker-compose -f "$(basename "$COMPOSE_FILE")" up -d "$API_SERVICE_NAME"
 
 # Wait for API to be ready
@@ -112,9 +79,18 @@ while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
         echo "✅ Backend deployed successfully to $TARGET_ENV environment"
         echo "Release: $RELEASE_NUMBER"
         echo "Health check: $HEALTH_CHECK"
-        echo "Database: myfinance_${TARGET_ENV}"
+        echo "Database: /data/$DB_FILE (SQLite)"
+        
+        # Verify SQLite database file
+        if docker exec "$API_CONTAINER_NAME" test -f "/data/$DB_FILE" 2>/dev/null; then
+            DB_SIZE=$(docker exec "$API_CONTAINER_NAME" stat -c%s "/data/$DB_FILE" 2>/dev/null || echo "0")
+            echo "SQLite database size: $DB_SIZE bytes"
+        else
+            echo "Note: Database file will be created on first API call"
+        fi
         
         # Log deployment
+        mkdir -p "$PROJECT_ROOT/logs"
         echo "$(date '+%Y-%m-%d %H:%M:%S') - Backend $RELEASE_NUMBER deployed to $TARGET_ENV" >> "$PROJECT_ROOT/logs/deployment.log"
         
         # Test database connection
@@ -132,13 +108,9 @@ done
 
 echo "❌ Backend deployment to $TARGET_ENV failed - health check timeout"
 echo "Check API logs: docker logs $API_CONTAINER_NAME"
-echo "Check DB logs: docker logs $DB_CONTAINER_NAME"
 
 # Show recent logs
 echo "Recent API logs:"
 docker logs --tail 50 "$API_CONTAINER_NAME"
-
-echo "Recent DB logs:"
-docker logs --tail 20 "$DB_CONTAINER_NAME"
 
 exit 1

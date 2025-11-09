@@ -43,8 +43,8 @@ dotnet test MyFinance.UnitTests/     # ✅ 23 tests pass
 dotnet test MyFinance.IntegrationTests/ # ✅ 12 tests pass
 
 # Build and push Docker image
-docker build -t ghcr.io/rocsa65/myfinance-api:v20251108-001 .
-docker push ghcr.io/rocsa65/myfinance-api:v20251108-001
+docker build -t ghcr.io/rocsa65/myfinance-server:v20251108-001 .
+docker push ghcr.io/rocsa65/myfinance-server:v20251108-001
 
 # Update production branch  
 git checkout production
@@ -64,9 +64,12 @@ blue
 # Blue containers running:
 $ docker ps | grep myfinance
 myfinance-api-blue      ✅ Up 2 days
-myfinance-client-blue   ✅ Up 2 days  
-myfinance-db-blue      ✅ Up 2 days
-myfinance-nginx-proxy  ✅ Up 2 days
+myfinance-client-blue   ✅ Up 2 days
+myfinance-nginx-proxy   ✅ Up 2 days
+
+# Note: SQLite databases are embedded in API containers
+# Blue DB: /data/finance_blue.db (inside myfinance-api-blue)
+# Green DB: /data/finance_green.db (inside myfinance-api-green)
 ```
 
 #### Deploy Backend to Green
@@ -76,15 +79,13 @@ myfinance-nginx-proxy  ✅ Up 2 days
 
 # Script output:
 Deploying backend to green environment with release v20251108-001...
-Pulling backend image: ghcr.io/rocsa65/myfinance-api:v20251108-001
+Pulling backend image: ghcr.io/rocsa65/myfinance-server:v20251108-001
 ✅ Image pulled successfully
-Starting backend services in green environment...
-Starting database first...
-✅ Database is ready
-Starting API service...
+Starting backend API in green environment...
 Waiting for API to be ready...
 Health check attempt 1/30 - Status: 200
 ✅ Backend deployed successfully to green environment
+Database: /data/finance_green.db (SQLite)
 ```
 
 #### Deploy Frontend to Green
@@ -108,10 +109,11 @@ Health check attempt 1/30 - Status: 200
 
 # Script output:
 Running database migrations on green environment...
-✅ Database is ready
 Creating database backup before migration...
+✅ Backup created: pre-migration-green-20251108-143045.db
 Running Entity Framework migrations...
 ✅ Database migrations completed successfully
+✅ Database file exists: finance_green.db (size: 245760 bytes)
 ✅ API health check passed after migration
 ```
 
@@ -183,13 +185,11 @@ green
 
 # Green containers now serving traffic:
 $ docker ps | grep myfinance
-myfinance-api-green     ✅ Up 10 minutes (ACTIVE)
+myfinance-api-green     ✅ Up 10 minutes (ACTIVE) - SQLite: /data/finance_green.db
 myfinance-client-green  ✅ Up 10 minutes (ACTIVE)
-myfinance-db-green     ✅ Up 10 minutes (ACTIVE)
-myfinance-api-blue     ✅ Up 2 days (STANDBY)
-myfinance-client-blue  ✅ Up 2 days (STANDBY)  
-myfinance-db-blue      ✅ Up 2 days (STANDBY)
-myfinance-nginx-proxy  ✅ Up 2 days (routing to GREEN)
+myfinance-api-blue      ✅ Up 2 days (STANDBY) - SQLite: /data/finance_blue.db
+myfinance-client-blue   ✅ Up 2 days (STANDBY)
+myfinance-nginx-proxy   ✅ Up 2 days (routing to GREEN)
 
 # Users accessing http://localhost now get the new release! 🎉
 ```

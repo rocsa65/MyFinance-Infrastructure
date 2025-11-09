@@ -45,8 +45,6 @@ fi
 # Validate required variables
 REQUIRED_VARS=(
     "DOCKER_REGISTRY"
-    "DB_USER" 
-    "DB_PASSWORD"
     "API_BASE_URL"
     "CLIENT_BASE_URL"
 )

@@ -101,10 +101,12 @@ This infrastructure supports blue-green deployment strategy:
 
 ## 🗃️ Database Management
 
-- **Development**: SQLite (containerized)
-- **Production**: PostgreSQL/SQL Server (to be configured)
-- **Migration**: Automated through Entity Framework
-- **Replication**: Blue-to-green data copying before deployment
+- **All Environments**: SQLite (file-based, embedded in API containers)
+- **Blue Environment**: `/data/finance_blue.db` (SQLite database file)
+- **Green Environment**: `/data/finance_green.db` (SQLite database file)
+- **Migration**: Automated through Entity Framework Core migrations
+- **Replication**: File-based copying between blue and green environments
+- **Backup**: SQLite database files are backed up before migrations and deployments
 
 ## 📊 Monitoring
 

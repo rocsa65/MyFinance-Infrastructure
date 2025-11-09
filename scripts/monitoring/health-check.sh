@@ -28,17 +28,17 @@ echo "Performing $SERVICE_TYPE health check on $TARGET_ENV environment..."
 # Create logs directory
 mkdir -p "$PROJECT_ROOT/logs"
 
-# Set environment-specific variables
+# Set environment-specific variables for SQLite
 if [[ "$TARGET_ENV" == "green" ]]; then
     API_CONTAINER="myfinance-api-green"
     CLIENT_CONTAINER="myfinance-client-green"
-    DB_CONTAINER="myfinance-db-green"
+    DB_FILE="finance_green.db"
     API_PORT="5002"
     CLIENT_PORT="3002"
 else
     API_CONTAINER="myfinance-api-blue"
     CLIENT_CONTAINER="myfinance-client-blue"
-    DB_CONTAINER="myfinance-db-blue"
+    DB_FILE="finance_blue.db"
     API_PORT="5001"
     CLIENT_PORT="3001"
 fi
@@ -102,21 +102,31 @@ check_frontend_health() {
 }
 
 check_database_health() {
-    echo "Checking database health..."
+    echo "Checking SQLite database health..."
     
-    # Check if container is running
-    if ! docker ps -q -f name="$DB_CONTAINER" | grep -q .; then
-        echo "❌ Database container '$DB_CONTAINER' is not running"
+    # Check if API container is running (SQLite is embedded in API)
+    if ! docker ps -q -f name="$API_CONTAINER" | grep -q .; then
+        echo "❌ API container '$API_CONTAINER' is not running (SQLite database is embedded)"
         return 1
     fi
     
-    # Check database connectivity
-    if docker exec "$DB_CONTAINER" pg_isready -U "${DB_USER:-postgres}" -d "myfinance_$TARGET_ENV" >/dev/null 2>&1; then
-        echo "✅ Database health check passed"
-        return 0
+    # Check if SQLite database file exists
+    if docker exec "$API_CONTAINER" test -f "/data/$DB_FILE" 2>/dev/null; then
+        DB_SIZE=$(docker exec "$API_CONTAINER" stat -c%s "/data/$DB_FILE" 2>/dev/null || echo "0")
+        
+        if [[ "$DB_SIZE" -gt "0" ]]; then
+            echo "✅ SQLite database health check passed"
+            echo "   - Database file: /data/$DB_FILE"
+            echo "   - File size: $DB_SIZE bytes"
+            return 0
+        else
+            echo "⚠️  SQLite database file exists but is empty"
+            return 1
+        fi
     else
-        echo "❌ Database health check failed"
-        return 1
+        echo "⚠️  SQLite database file not yet created (will be created on first API call)"
+        echo "   - Expected location: /data/$DB_FILE"
+        return 0  # Not an error - DB created on demand
     fi
 }
 

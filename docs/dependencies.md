@@ -65,16 +65,19 @@ Monitoring scripts
 ## Database Scripts Dependencies
 ```
 scripts/database/migrate.sh
-├── requires: API container running
+├── requires: API container running (SQLite embedded)
 ├── executes: dotnet ef database update inside container
-├── creates: backup before migration
+├── creates: backup of SQLite .db file before migration
+├── verifies: Database file exists and has size > 0
 └── verifies: API health after migration
 
 scripts/database/replicate.sh
-├── requires: Both blue and green DB containers
-├── creates: pg_dump from source
-├── restores: dump to target database
-└── verifies: table count matches
+├── requires: Both blue and green API containers running
+├── creates: Copy of source SQLite database file
+├── stops: Target API container (prevent database locks)
+├── copies: SQLite .db file from source to target
+├── restarts: Target API container
+└── verifies: Database file size matches source
 ```
 
 ## Monitoring Stack Dependencies

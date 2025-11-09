@@ -110,20 +110,39 @@
       },
       {
         "id": 5,
-        "title": "Database Connections",
-        "type": "graph",
+        "title": "SQLite Database Health",
+        "type": "stat",
         "targets": [
           {
-            "expr": "pg_stat_database_numbackends{job=~\"postgres-.*\"}",
-            "legendFormat": "Active Connections - {{ job }}"
+            "expr": "up{job=~\"myfinance-api-.*\"}",
+            "legendFormat": "API Health (SQLite Embedded) - {{ job }}"
           }
         ],
-        "yAxes": [
-          {
-            "label": "Connections",
-            "min": 0
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "options": {
+                  "0": {
+                    "text": "DB UNAVAILABLE",
+                    "color": "red"
+                  },
+                  "1": {
+                    "text": "DB AVAILABLE",
+                    "color": "green"
+                  }
+                },
+                "type": "value"
+              }
+            ],
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "green", "value": 1}
+              ]
+            }
           }
-        ],
+        },
         "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
       },
       {
