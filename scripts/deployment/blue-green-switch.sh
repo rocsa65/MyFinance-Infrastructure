@@ -9,9 +9,6 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# Source environment configuration
-source "$SCRIPT_DIR/load-env.sh" production
-
 TARGET_ENV="$1"
 SERVICE="${2:-both}"  # Default to 'both' if not specified
 
@@ -52,7 +49,7 @@ if [[ "$TARGET_ENV" == "green" ]]; then
     
     if [[ "$SERVICE" == "client" || "$SERVICE" == "both" ]]; then
         SED_COMMANDS="$SED_COMMANDS -e 's/^[[:space:]]*server myfinance-client-blue:80;/# server myfinance-client-blue:80;/'"
-        SED_COMMANDS="$SED_COMMANDS -e 's/^[[:space:]]*#[[:space:]]*server myfinance-client-green:80;/server myfinance-client-green:80;/'"
+        SED_COMMANDS="$SED_COMMANDS -e 's/^[[:space:]]*#[[:space:]]*server myfinance-client-green:80;/server myfinance-client-green:80;/' -e 's/^# server myfinance-client-green:80;/server myfinance-client-green:80;/'"
     fi
     
     eval sed -i.tmp $SED_COMMANDS "$NGINX_CONFIG"
@@ -70,7 +67,7 @@ else
     fi
     
     if [[ "$SERVICE" == "client" || "$SERVICE" == "both" ]]; then
-        SED_COMMANDS="$SED_COMMANDS -e 's/^[[:space:]]*#[[:space:]]*server myfinance-client-blue:80;/server myfinance-client-blue:80;/'"
+        SED_COMMANDS="$SED_COMMANDS -e 's/^[[:space:]]*#[[:space:]]*server myfinance-client-blue:80;/server myfinance-client-blue:80;/' -e 's/^# server myfinance-client-blue:80;/server myfinance-client-blue:80;/'"
         SED_COMMANDS="$SED_COMMANDS -e 's/^[[:space:]]*server myfinance-client-green:80;/# server myfinance-client-green:80;/'"
     fi
     

@@ -8,8 +8,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# Source environment configuration
-source "$SCRIPT_DIR/load-env.sh" production
+# Set registry (Jenkins also sets this in environment)
+DOCKER_REGISTRY="${DOCKER_REGISTRY:-ghcr.io/rocsa65}"
 
 TARGET_ENV="$1"
 RELEASE_NUMBER="$2"

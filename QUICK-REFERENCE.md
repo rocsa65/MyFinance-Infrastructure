@@ -1,139 +1,221 @@
 # 🚀 Quick Reference - Blue-Green Deployment
 
-## First Time Setup
+## Jenkins Deployment (Recommended)
 
 ```bash
-# 1. Edit configuration
-notepad environments/production/.env
-# Update: DOCKER_REGISTRY, GITHUB_PACKAGES_USER, GITHUB_PACKAGES_TOKEN
+# 1. Start Jenkins
+cd jenkins\docker
+docker-compose up -d
 
-# 2. Run initialization (Git Bash or WSL)
-bash scripts/deployment/init-blue-green.sh
+# 2. Access Jenkins: http://localhost:8081 (admin/admin)
 
-# 3. Deploy blue environment
-bash scripts/deployment/deploy-backend.sh blue latest
-bash scripts/deployment/deploy-frontend.sh blue latest
+# 3. Configure GitHub token in Jenkins UI
+# Navigate to: Manage Jenkins → Credentials → Add github-token
+
+# 4. Deploy via Jenkins
+# Go to: MyFinance → Backend-Release → Build with Parameters
+# Go to: MyFinance → Frontend-Release → Build with Parameters
 ```
 
-## Common Commands
+## Manual Commands (Advanced Users)
 
-### Deploy
+### Quick Setup
+
 ```bash
-# Deploy to blue
-bash scripts/deployment/deploy-backend.sh blue <version>
-bash scripts/deployment/deploy-frontend.sh blue <version>
+# 1. Create Docker network
+docker network create myfinance-network
 
-# Deploy to green
+# 2. Start Jenkins and nginx
+cd jenkins\docker
+docker-compose up -d
+```
+
+### Deploy (Via Scripts)
+
+```bash
+# Backend deployment (used by Jenkins)
 bash scripts/deployment/deploy-backend.sh green <version>
+
+# Frontend deployment (used by Jenkins)
 bash scripts/deployment/deploy-frontend.sh green <version>
 ```
 
 ### Database
+
 ```bash
-# Copy database from blue to green
-bash scripts/database/replicate.sh blue green
-
-# Run migrations
-bash scripts/database/migrate.sh <blue|green>
-
 # Backup database
 docker cp myfinance-api-blue:/data/finance_blue.db backup/
+docker cp myfinance-api-green:/data/finance_green.db backup/
+
+# View database
+docker exec myfinance-api-green ls -la /data/
 ```
 
 ### Health Checks
-```bash
-# Check system health
-bash scripts/monitoring/health-check.sh system blue
-bash scripts/monitoring/health-check.sh system green
 
-# Quick health check
-curl http://localhost:5001/health  # Blue API
-curl http://localhost:5002/health  # Green API
+```bash
+# API health (through nginx)
+curl http://localhost/health
+
+# Client health (through nginx - requires Host header)
+curl -H "Host: myfinance.local" http://localhost/
+
+# Direct container health
+docker exec myfinance-jenkins curl http://myfinance-api-green:80/health
+docker exec myfinance-jenkins curl http://myfinance-client-green:80/
 ```
 
 ### Traffic Control
+
 ```bash
-# Switch to green
-bash scripts/deployment/blue-green-switch.sh green
-
-# Rollback to blue
-bash scripts/deployment/rollback.sh blue
-
-# Check current environment
-cat current-environment.txt
+# Switch traffic (backend, frontend, or both)
+cd scripts/deployment
+./blue-green-switch.sh green api      # Switch API to GREEN
+./blue-green-switch.sh blue api       # Switch API to BLUE
+./blue-green-switch.sh green client   # Switch client to GREEN
+./blue-green-switch.sh blue client    # Switch client to BLUE
+./blue-green-switch.sh green both     # Switch both to GREEN
 ```
 
+## Rollback
+
+```bash
+# Automatic rollback happens in Jenkins if deployment fails after traffic switch
+
+# Manual rollback - switch traffic to previous environment
+cd scripts/deployment
+./blue-green-switch.sh blue api      # Rollback API to BLUE
+./blue-green-switch.sh blue client   # Rollback client to BLUE
+./blue-green-switch.sh blue both     # Rollback both to BLUE
+```
+
+## Access Points
+
+| Service | Production (nginx) | Blue (direct) | Green (direct) |
+|---------|-------------------|---------------|----------------|
+| API | http://localhost/health | http://localhost:5001 | http://localhost:5002 |
+| Client | http://localhost/ | http://localhost:3001 | http://localhost:3002 |
+| Jenkins | http://localhost:8081 | - | - |
+
+**Note:** Production traffic goes through nginx on port 80. Direct ports are for testing only.
+
 ### Container Management
+
 ```bash
 # View running containers
 docker ps | grep myfinance
 
 # View logs
+docker logs myfinance-jenkins
+docker logs myfinance-nginx-proxy
 docker logs myfinance-api-blue
 docker logs myfinance-api-green
+docker logs myfinance-client-blue
+docker logs myfinance-client-green
 
 # Restart container
-docker restart myfinance-api-blue
+docker restart myfinance-api-green
+docker restart myfinance-client-green
+
+# Check which environment is active
+docker exec myfinance-nginx-proxy cat /etc/nginx/conf.d/default.conf | grep "server myfinance"
 ```
 
-## Access Points
-
-| Service | Blue | Green |
-|---------|------|-------|
-| API | http://localhost:5001 | http://localhost:5002 |
-| Client | http://localhost:3001 | http://localhost:3002 |
-| Health | http://localhost:5001/health | http://localhost:5002/health |
-
-## Monitoring
+## Jenkins Operations
 
 ```bash
-# Start monitoring stack
-cd monitoring && docker-compose up -d
+# Start/Stop Jenkins
+cd jenkins\docker
+docker-compose up -d
+docker-compose down
 
-# Prometheus: http://localhost:9090
-# Grafana: http://localhost:3003 (admin/admin123)
+# View Jenkins logs
+docker logs myfinance-jenkins
+
+# Access Jenkins container
+docker exec -it myfinance-jenkins bash
+
+# Update pipeline (after editing .groovy files)
+# Pipelines are stored in /var/jenkins_home/pipelines/ inside container
+docker cp jenkins\pipelines\backend-release.groovy myfinance-jenkins:/var/jenkins_home/pipelines/
+docker cp jenkins\pipelines\frontend-release.groovy myfinance-jenkins:/var/jenkins_home/pipelines/
 ```
 
 ## Logs
 
 ```bash
-cat logs/deployment.log      # Deployment history
-cat logs/health-check.log    # Health check results
-cat logs/replication.log     # Database replication
-cat logs/migration.log       # Database migrations
+# Jenkins build logs
+# View in Jenkins UI: Build → Console Output
+
+# Container logs
+docker logs myfinance-jenkins
+docker logs myfinance-nginx-proxy
+docker logs myfinance-api-green
+docker logs myfinance-client-green
 ```
 
 ## Troubleshooting
 
 ```bash
+# Jenkins won't start?
+docker logs myfinance-jenkins
+cd jenkins\docker
+docker-compose restart
+
 # Container won't start?
-docker logs myfinance-api-blue
+docker logs myfinance-api-green
 
 # Database missing?
-docker exec myfinance-api-blue ls -la /data/
+docker exec myfinance-api-green ls -la /data/
 
-# Script permission denied?
-chmod +x scripts/**/*.sh
-
-# Can't connect?
+# Can't connect to containers?
 docker network inspect myfinance-network
+
+# Nginx returns 502?
+docker logs myfinance-nginx-proxy
+docker exec myfinance-nginx-proxy cat /etc/nginx/conf.d/default.conf
+
+# Health checks failing?
+# Check if using container names instead of localhost
+docker exec myfinance-jenkins curl http://myfinance-api-green:80/health
+
+# Pipeline fails?
+# Check Jenkins Console Output for detailed error messages
 ```
 
 ## File Locations
 
-- **Config**: `environments/production/.env`
-- **Logs**: `logs/`
-- **Backups**: `backup/`
-- **Current env**: `current-environment.txt`
+- **Jenkins pipelines**: `jenkins/pipelines/`
+- **Nginx config**: `docker/nginx/blue-green.conf`
+- **Docker compose**: `jenkins/docker/docker-compose.yml`
+- **Deployment scripts**: `scripts/deployment/`
+- **Database backups**: `backup/`
 
-## Blue-Green Workflow
+## Blue-Green Workflow (Jenkins)
 
 ```
-1. Deploy to Green    → deploy-backend.sh green v1.2.3
-2. Replicate DB       → replicate.sh blue green
-3. Run Migrations     → migrate.sh green
-4. Test Green         → health-check.sh system green
-5. Switch Traffic     → blue-green-switch.sh green
-6. Monitor            → Check logs for 10 min
-7. Rollback if needed → rollback.sh blue
+1. Push code to staging branch (GitHub)
+2. Go to Jenkins → MyFinance → Backend-Release (or Frontend-Release)
+3. Click "Build with Parameters"
+4. Jenkins automatically:
+   - Pulls code
+   - Runs tests
+   - Builds Docker image
+   - Pushes to GitHub Packages
+   - Deploys to GREEN
+   - Runs migrations (backend only)
+   - Performs health checks
+   - Switches traffic to GREEN
+   - Automatic rollback on failure
+5. Monitor logs in Jenkins Console Output
+```
+
+## Clean Slate Reset
+
+```bash
+# Remove everything and start fresh
+.\cleanup-all.bat   # Windows
+./cleanup-all.sh    # Linux/Mac
+
+# Then follow DEPLOYMENT-GUIDE.md Fresh Installation steps
 ```

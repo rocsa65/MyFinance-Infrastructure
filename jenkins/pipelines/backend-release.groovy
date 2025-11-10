@@ -265,6 +265,9 @@ pipeline {
                     echo "Switching production traffic to ${env.TARGET_ENV} environment"
                     sh "/var/jenkins_home/scripts/deployment/blue-green-switch.sh ${env.TARGET_ENV} api"
                     
+                    // Mark that traffic switch succeeded
+                    env.TRAFFIC_SWITCHED = 'true'
+                    
                     echo "✅ Traffic switched to ${env.TARGET_ENV.toUpperCase()}"
                     echo "Production is now running: ${env.RELEASE_NUMBER}"
                     echo ""
@@ -284,8 +287,28 @@ pipeline {
         
         failure {
             script {
-                echo "Backend release pipeline failed"
-                sh "/var/jenkins_home/scripts/monitoring/notify-failure.sh backend ${env.RELEASE_NUMBER}"
+                def releaseNum = env.RELEASE_NUMBER ?: 'UNKNOWN'
+                echo "Backend release pipeline failed for ${releaseNum}"
+                
+                // Automatic rollback if traffic was switched but pipeline failed afterwards
+                if (env.TRAFFIC_SWITCHED == 'true' && env.CURRENT_ENV) {
+                    echo "🚨 AUTOMATIC ROLLBACK INITIATED 🚨"
+                    echo "Rolling back to ${env.CURRENT_ENV} environment"
+                    
+                    try {
+                        sh "/var/jenkins_home/scripts/deployment/blue-green-switch.sh ${env.CURRENT_ENV} api"
+                        echo "✅ Rollback successful - traffic restored to ${env.CURRENT_ENV}"
+                        sh "/var/jenkins_home/scripts/monitoring/notify-rollback.sh ${env.CURRENT_ENV} SUCCESS"
+                    } catch (Exception e) {
+                        echo "❌ Rollback failed: ${e.message}"
+                        echo "⚠️ MANUAL INTERVENTION REQUIRED"
+                        sh "/var/jenkins_home/scripts/monitoring/notify-rollback.sh ${env.CURRENT_ENV} FAILED"
+                    }
+                } else {
+                    echo "No rollback needed - traffic was not switched"
+                }
+                
+                sh "/var/jenkins_home/scripts/monitoring/notify-failure.sh backend ${releaseNum}"
             }
         }
         

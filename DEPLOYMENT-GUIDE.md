@@ -66,7 +66,7 @@ You should see:
 
 - **URL:** http://localhost:8081
 - **Username:** `admin`
-- **Password:** `admin`
+- **Password:** `admin123`
 
 **Verify Jenkins Setup:**
 1. Check folder exists: `MyFinance`
@@ -271,25 +271,69 @@ docker logs myfinance-client-blue
 
 ## Rollback Procedures
 
-### Quick Rollback
+### Understanding Rollback in Blue-Green Deployment
 
-If the new deployment has issues, switch back to the previous environment:
+In blue-green deployment, **rollback is simply switching traffic back to the previous environment**. Since the old version remains running in the inactive environment after deployment, rollback is instant and safe.
+
+### Automated Rollback (Built-in)
+
+**The pipelines include automatic rollback** if deployment fails after traffic has been switched:
+
+**How it works:**
+1. Traffic is successfully switched to new environment (e.g., GREEN)
+2. If any subsequent check fails or pipeline encounters an error
+3. Pipeline automatically switches traffic back to previous environment (BLUE)
+4. Sends rollback notification
+5. Previous version continues serving traffic seamlessly
+
+**When automatic rollback triggers:**
+- ✅ Traffic was switched AND pipeline failed afterwards → **Auto-rollback to previous environment**
+- ❌ Deployment failed BEFORE traffic switch → No rollback needed (old version still live)
+- ❌ First deployment (no previous environment) → No rollback possible
+
+**You'll see in the logs:**
+```
+🚨 AUTOMATIC ROLLBACK INITIATED 🚨
+Rolling back to blue environment
+✅ Rollback successful - traffic restored to blue
+```
+
+### Manual Rollback (If Needed)
+
+If the new deployment has issues, switch traffic back to the previous environment:
 
 ```cmd
 cd scripts\deployment
-.\blue-green-switch.sh blue api    # Switch API to BLUE
-.\blue-green-switch.sh green api   # Switch API to GREEN
-.\blue-green-switch.sh blue client    # Switch client to BLUE
-.\blue-green-switch.sh green client   # Switch client to GREEN
+
+# Rollback API to BLUE environment
+.\blue-green-switch.sh blue api
+
+# Rollback client to BLUE environment
+.\blue-green-switch.sh blue client
+
+# Rollback both services together
+.\blue-green-switch.sh blue both
 ```
 
-### Manual Rollback via Jenkins
+**What this does:**
+1. Starts the previous environment container if it was stopped
+2. Verifies it's healthy
+3. Switches nginx traffic routing
+4. Stops the problematic new deployment
 
-1. Trigger a new deployment to the previous environment
-2. Uncheck AUTO_SWITCH_TRAFFIC
-3. Review thoroughly before approving traffic switch
+### Rollback via Jenkins Re-deployment
 
-### Emergency Rollback
+Deploy a previous release version:
+
+1. Go to Jenkins → Backend-Release or Frontend-Release
+2. Click "Build with Parameters"
+3. Set RELEASE_NUMBER to previous version (e.g., v1.0.0)
+4. Set AUTO_SWITCH_TRAFFIC to true
+5. Click "Build"
+
+**Note:** This rebuilds the old version rather than reusing the existing container.
+
+### Emergency Manual Rollback
 
 If automation fails, manually edit nginx config:
 
@@ -796,7 +840,6 @@ docker cp myfinance-api-green:/data/finance_green.db backup\
 ## Support & Documentation
 
 - **QUICK-REFERENCE.md:** Cheat sheet of common commands
-- **JENKINS-SETUP.md:** Detailed Jenkins configuration
 - **docs/blue-green-flow.md:** Blue-green deployment flow diagrams
 - **docs/cicd-architecture.md:** CI/CD architecture overview
 - **scripts/README.md:** Script documentation

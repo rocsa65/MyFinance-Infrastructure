@@ -31,9 +31,6 @@ pipeline {
                 script {
                     echo "Starting release pipeline for: ${params.RELEASE_TYPE}"
                     echo "Release Number: ${env.RELEASE_NUMBER}"
-                    
-                    // Load environment variables
-                    sh 'source /var/jenkins_home/scripts/deployment/load-env.sh production'
                 }
             }
         }
