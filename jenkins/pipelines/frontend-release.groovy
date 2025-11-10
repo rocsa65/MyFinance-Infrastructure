@@ -4,6 +4,7 @@ pipeline {
     parameters {
         string(name: 'RELEASE_NUMBER', defaultValue: '', description: 'Release number to deploy')
         booleanParam(name: 'SKIP_TESTS', defaultValue: false, description: 'Skip test execution')
+        booleanParam(name: 'AUTO_SWITCH_TRAFFIC', defaultValue: false, description: 'Automatically switch traffic without approval')
     }
     
     environment {
@@ -13,6 +14,54 @@ pipeline {
     }
     
     stages {
+        stage('Determine Target Environment') {
+            steps {
+                script {
+                    echo "Detecting which environment is currently live..."
+                    
+                    // Read NGINX config to determine which environment is active
+                    def nginxConfig = readFile('/var/jenkins_home/docker/nginx/blue-green.conf')
+                    
+                    // Check if blue is active (not commented out)
+                    def blueActive = nginxConfig.contains('server myfinance-client-blue:80;') && 
+                                     !nginxConfig.contains('# server myfinance-client-blue:80;')
+                    
+                    // Check if green is active (not commented out)
+                    def greenActive = nginxConfig.contains('server myfinance-client-green:80;') && 
+                                      !nginxConfig.contains('# server myfinance-client-green:80;')
+                    
+                    if (blueActive && !greenActive) {
+                        // Blue is live, deploy to Green
+                        env.TARGET_ENV = 'green'
+                        env.CURRENT_ENV = 'blue'
+                        env.IS_FIRST_DEPLOYMENT = 'false'
+                    } else if (greenActive && !blueActive) {
+                        // Green is live, deploy to Blue
+                        env.TARGET_ENV = 'blue'
+                        env.CURRENT_ENV = 'green'
+                        env.IS_FIRST_DEPLOYMENT = 'false'
+                    } else {
+                        // Neither is live (first deployment) - default to Green
+                        env.TARGET_ENV = 'green'
+                        env.CURRENT_ENV = 'none'
+                        env.IS_FIRST_DEPLOYMENT = 'true'
+                        echo "⚠️  First deployment detected - no environment is currently live"
+                    }
+                    
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    echo "Blue-Green Deployment Strategy"
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    if (env.IS_FIRST_DEPLOYMENT == 'true') {
+                        echo "First deployment: Deploying to ${env.TARGET_ENV.toUpperCase()}"
+                        echo "After this deployment, ${env.TARGET_ENV.toUpperCase()} will be live"
+                    } else {
+                        echo "Current LIVE environment: ${env.CURRENT_ENV.toUpperCase()} (serving traffic)"
+                        echo "Target deployment environment: ${env.TARGET_ENV.toUpperCase()} (will receive new release)"
+                    }
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                }
+            }
+        }
         stage('Checkout Staging') {
             steps {
                 git branch: 'staging', url: "https://github.com/${env.GITHUB_REPO}.git"
@@ -150,20 +199,99 @@ pipeline {
             }
         }
         
-        stage('Deploy to Green Environment') {
+        stage('Deploy to Target Environment') {
             steps {
                 script {
-                    echo "Deploying frontend to green environment"
-                    sh "/var/jenkins_home/scripts/deployment/deploy-frontend.sh green ${env.RELEASE_NUMBER}"
+                    echo "Deploying frontend to ${env.TARGET_ENV} environment"
+                    echo "Current live environment (${env.CURRENT_ENV}) will remain serving traffic during deployment"
+                    sh "/var/jenkins_home/scripts/deployment/deploy-frontend.sh ${env.TARGET_ENV} ${env.RELEASE_NUMBER}"
                 }
             }
         }
         
-        stage('Health Check Green') {
+        stage('Health Check Target') {
             steps {
                 script {
-                    echo "Performing health check on green environment"
-                    sh "/var/jenkins_home/scripts/monitoring/health-check.sh frontend green"
+                    echo "Performing health check on ${env.TARGET_ENV} environment"
+                    sh "/var/jenkins_home/scripts/monitoring/health-check.sh frontend ${env.TARGET_ENV}"
+                }
+            }
+        }
+        
+        stage('Integration Test Target') {
+            when {
+                expression { !params.SKIP_TESTS }
+            }
+            steps {
+                script {
+                    echo "Running integration tests against ${env.TARGET_ENV} environment"
+                    sh "/var/jenkins_home/scripts/monitoring/integration-test.sh ${env.TARGET_ENV}"
+                }
+            }
+        }
+        
+        stage('Approve Traffic Switch') {
+            when {
+                expression { !params.AUTO_SWITCH_TRAFFIC }
+            }
+            steps {
+                script {
+                    echo "${env.TARGET_ENV.toUpperCase()} environment is ready and tested"
+                    echo "Release: ${env.RELEASE_NUMBER}"
+                    echo ""
+                    
+                    if (env.IS_FIRST_DEPLOYMENT == 'true') {
+                        echo "First deployment:"
+                        echo "  - ${env.TARGET_ENV.toUpperCase()}: New release (tested, ready to go live)"
+                        echo ""
+                        echo "Next action: Make ${env.TARGET_ENV.toUpperCase()} live (first production deployment)"
+                    } else {
+                        echo "Current state:"
+                        echo "  - ${env.CURRENT_ENV.toUpperCase()}: Live (serving production traffic)"
+                        echo "  - ${env.TARGET_ENV.toUpperCase()}: New release (tested, ready to go live)"
+                        echo ""
+                        echo "Next action: Switch traffic from ${env.CURRENT_ENV.toUpperCase()} to ${env.TARGET_ENV.toUpperCase()}"
+                    }
+                    
+                    // Manual approval - manager/lead clicks "Proceed" in Jenkins UI
+                    def approvalMessage = env.IS_FIRST_DEPLOYMENT == 'true' ? 
+                        "Make ${env.TARGET_ENV.toUpperCase()} live?" : 
+                        "Switch traffic to ${env.TARGET_ENV.toUpperCase()} environment?"
+                    
+                    def approvalButton = env.IS_FIRST_DEPLOYMENT == 'true' ?
+                        "Go Live with ${env.TARGET_ENV.toUpperCase()}" :
+                        "Switch to ${env.TARGET_ENV.toUpperCase()}"
+                    
+                    def confirmChoices = env.IS_FIRST_DEPLOYMENT == 'true' ?
+                        ["Yes, go live with ${env.TARGET_ENV.toUpperCase()}", "No, abort deployment"] :
+                        ["Yes, switch to ${env.TARGET_ENV.toUpperCase()}", "No, keep ${env.CURRENT_ENV.toUpperCase()} live"]
+                    
+                    input(
+                        message: approvalMessage,
+                        ok: approvalButton,
+                        submitter: "admin",  // Add your manager's Jenkins username here
+                        parameters: [
+                            choice(
+                                name: 'CONFIRM',
+                                choices: confirmChoices,
+                                description: 'Confirm traffic switch to new release'
+                            )
+                        ]
+                    )
+                }
+            }
+        }
+        
+        stage('Switch Traffic to Target') {
+            steps {
+                script {
+                    echo "Switching production traffic to ${env.TARGET_ENV} environment"
+                    sh "/var/jenkins_home/scripts/deployment/blue-green-switch.sh ${env.TARGET_ENV} client"
+                    
+                    echo "✅ Traffic switched to ${env.TARGET_ENV.toUpperCase()}"
+                    echo "Production is now running: ${env.RELEASE_NUMBER}"
+                    echo ""
+                    echo "${env.CURRENT_ENV.toUpperCase()} environment is now idle (can be used for rollback)"
                 }
             }
         }
@@ -172,14 +300,42 @@ pipeline {
     post {
         success {
             script {
-                echo "Frontend release pipeline completed successfully"
-                currentBuild.description = "Frontend Release ${env.RELEASE_NUMBER}"
+                echo "Frontend Release ${env.RELEASE_NUMBER} deployed successfully"
+                echo "Environment: ${env.TARGET_ENV.toUpperCase()}"
+                echo ""
+                echo "Status:"
+                if (params.AUTO_SWITCH_TRAFFIC) {
+                    echo "  - Traffic: Automatically switched to ${env.TARGET_ENV.toUpperCase()}"
+                    echo "  - Production: ${env.RELEASE_NUMBER} is now live"
+                    if (env.IS_FIRST_DEPLOYMENT != 'true') {
+                        echo "  - ${env.CURRENT_ENV.toUpperCase()}: Stopped (previous version available for rollback)"
+                    }
+                } else {
+                    echo "  - Traffic: Successfully switched to ${env.TARGET_ENV.toUpperCase()}"
+                    echo "  - Production: ${env.RELEASE_NUMBER} is now live"
+                    if (env.IS_FIRST_DEPLOYMENT != 'true') {
+                        echo "  - ${env.CURRENT_ENV.toUpperCase()}: Stopped (previous version available for rollback)"
+                    }
+                }
+                currentBuild.description = "Frontend Release ${env.RELEASE_NUMBER} - ${env.TARGET_ENV.toUpperCase()}"
             }
         }
         
         failure {
             script {
-                echo "Frontend release pipeline failed"
+                echo "Frontend Release ${env.RELEASE_NUMBER} failed"
+                echo ""
+                echo "Current state:"
+                if (env.IS_FIRST_DEPLOYMENT == 'true') {
+                    echo "  - No traffic affected (first deployment failed)"
+                    echo "  - No rollback needed"
+                } else {
+                    echo "  - ${env.CURRENT_ENV.toUpperCase()}: Still live (serving production traffic)"
+                    echo "  - ${env.TARGET_ENV.toUpperCase()}: Deployment failed"
+                    echo "  - No rollback needed - production traffic was never switched"
+                }
+                echo ""
+                echo "Check logs above for error details"
                 sh "/var/jenkins_home/scripts/monitoring/notify-failure.sh frontend ${env.RELEASE_NUMBER}"
             }
         }

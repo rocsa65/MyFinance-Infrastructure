@@ -1,26 +1,11 @@
 import jenkins.model.*
 import hudson.tools.*
-import hudson.plugins.nodejs.*
-import hudson.plugins.nodejs.tools.*
 
 def instance = Jenkins.getInstance()
 
-// Configure Node.js
-def nodeJsInstaller = new NodeJSInstaller("18.19.0", "", 100)
-def nodeJsInstallation = new NodeJSInstallation(
-    "Node 18", 
-    "", 
-    [new InstallSourceProperty([nodeJsInstaller])]
-)
+// NodeJS and other tools will be installed automatically when needed by pipelines
+// Or can be configured manually through Jenkins UI after startup
 
-def nodeJsDescriptor = instance.getDescriptor(NodeJSInstallation.class)
-nodeJsDescriptor.setInstallations(nodeJsInstallation)
-nodeJsDescriptor.save()
-
-// Configure .NET
-// Note: .NET is installed via Dockerfile, this just configures global tools
-def dotnetTool = new ToolProperty()
+println "Jenkins tools configuration skipped - will be configured through UI"
 
 instance.save()
-
-println "Jenkins tools configured"

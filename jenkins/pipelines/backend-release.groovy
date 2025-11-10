@@ -263,7 +263,7 @@ pipeline {
             steps {
                 script {
                     echo "Switching production traffic to ${env.TARGET_ENV} environment"
-                    sh "/var/jenkins_home/scripts/deployment/blue-green-switch.sh ${env.TARGET_ENV}"
+                    sh "/var/jenkins_home/scripts/deployment/blue-green-switch.sh ${env.TARGET_ENV} api"
                     
                     echo "✅ Traffic switched to ${env.TARGET_ENV.toUpperCase()}"
                     echo "Production is now running: ${env.RELEASE_NUMBER}"

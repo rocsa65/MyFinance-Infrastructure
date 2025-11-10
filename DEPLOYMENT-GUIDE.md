@@ -10,27 +10,17 @@ This guide provides step-by-step instructions to deploy and run the MyFinance ap
 
 ## Deployment Steps
 
-### Step 1: Start Nginx Reverse Proxy
+### Step 1: Create Docker Network
 
-Start nginx first - it will wait for backend containers to be deployed.
+Create the external network that all containers will use:
 
 ```bash
-cd docker/nginx
-docker-compose up -d
+docker network create myfinance-network
 ```
-
-**Verify nginx is running:**
-```bash
-docker ps
-```
-
-You should see `myfinance-nginx-proxy` container running on ports 80 and 443.
-
-**Note:** Nginx is configured to route to GREEN initially. It will return 502 errors until the first backend deployment completes.
 
 ### Step 2: Start Jenkins CI/CD Server
 
-Jenkins automates the blue-green deployment process and will configure nginx during the first deployment.
+Jenkins automates the blue-green deployment process and includes nginx in the same stack.
 
 ```bash
 cd jenkins/docker
@@ -42,9 +32,20 @@ docker-compose up -d
 - Username: `admin`
 - Password: `admin123`
 
+**Verify Jenkins and Nginx are running:**
+```bash
+docker ps
+```
+
+You should see:
+- `myfinance-jenkins` container running on port 8081
+- `myfinance-nginx-proxy` container running on ports 80 and 443
+
+**Note:** Nginx starts with both BLUE and GREEN environments commented out (inactive). It will return 502 errors until the first backend deployment completes.
+
 **Verify Jenkins is ready:**
 - Wait 30-60 seconds for Jenkins to initialize
-- Check that jobs are auto-created: `Backend-Release` and `Frontend-Release`
+- Check that jobs are auto-created in the `MyFinance` folder: `Backend-Release` and `Frontend-Release`
 
 ### Step 3: Configure GitHub Token in Jenkins
 
@@ -61,33 +62,42 @@ The pipeline needs access to your GitHub repository.
 
 From Jenkins UI, trigger a backend deployment:
 
-1. Open `Backend-Release` job
-2. Click "Build with Parameters"
-3. Enter:
-   - `TAG`: Version tag (e.g., `v1.0.1`)
-   - `REPO_URL`: `https://github.com/rocsa65/MyFinance-Backend.git`
-4. Click "Build"
+1. Navigate to `MyFinance` folder
+2. Open `Backend-Release` job
+3. Click "Build with Parameters"
+4. Enter:
+   - `RELEASE_NUMBER`: Version number (e.g., `v1.0.1`) or leave empty to auto-generate
+   - `SKIP_TESTS`: false (run tests)
+   - `SKIP_MIGRATION`: false (run migrations)
+   - `AUTO_SWITCH_TRAFFIC`: false (require manual approval)
+5. Click "Build"
 
 **Pipeline Stages:**
-1. **Checkout** - Clones backend repository
-2. **Build & Test** - Runs npm install and tests
-3. **Build Docker Image** - Creates tagged Docker image
-4. **Detect Environment** - Detects first deployment (neither BLUE nor GREEN active)
-5. **Deploy to Target** - Deploys to GREEN (default for first deployment)
-6. **Health Check** - Verifies new deployment is healthy
-7. **Approval** - Manual approval gate (click "Proceed" in Jenkins)
-8. **Switch Traffic** - Updates nginx config (GREEN is already active for first deployment)
-9. **Verify** - Final health check on GREEN environment
+1. **Determine Target Environment** - Detects which environment is currently live
+2. **Checkout Staging** - Clones from `staging` branch of `rocsa65/MyFinance` repository
+3. **Build** - Runs dotnet build for .NET backend
+4. **Test** - Runs dotnet test
+5. **Build Docker Image** - Creates tagged Docker image for backend
+6. **Push to Registry** - Pushes image to GitHub Container Registry (ghcr.io)
+7. **Update Production Branch** - Merges staging to production branch and creates release tag
+8. **Deploy to Target Environment** - Deploys to the inactive environment (GREEN for first deployment)
+9. **Database Migration** - Runs database migrations on target environment
+10. **Health Check Target** - Verifies new deployment is healthy
+11. **Integration Test Target** - Runs integration tests against new deployment
+12. **Approve Traffic Switch** - Manual approval gate (click "Proceed" in Jenkins)
+13. **Switch Traffic to Target** - Updates nginx config to route traffic to new environment
 
 **For subsequent deployments:**
 - Pipeline detects which environment is live (BLUE or GREEN)
 - Deploys new version to the inactive environment
 - After approval, switches traffic to the newly deployed version
+- Stops the now-inactive environment to save resources
 
 **Note:** The first deployment will:
-- Detect that GREEN is configured but no container exists
-- Deploy backend to GREEN environment  
-- GREEN will immediately serve traffic through nginx (no traffic switch needed)
+- Detect that neither BLUE nor GREEN is active (both commented out in nginx config)
+- Deploy backend to GREEN environment (default for first deployment)
+- After approval, uncomment GREEN in nginx config to start serving traffic
+- GREEN becomes the live environment
 
 ### Step 5: Monitor Deployment
 
@@ -129,15 +139,29 @@ Or manually trigger traffic switch:
 
 - **BLUE Environment**: `myfinance-api-blue` on port 5001
 - **GREEN Environment**: `myfinance-api-green` on port 5002
-- **Nginx**: Routes traffic to active environment
+- **Nginx**: Routes traffic to active environment (starts with both inactive)
 - **Zero Downtime**: New version deployed to inactive, then traffic switches
+
+### Initial State
+
+When the infrastructure starts:
+- Both BLUE and GREEN upstreams are commented out in nginx config
+- Nginx returns 502 Bad Gateway until first deployment
+- First deployment detects no active environment and defaults to GREEN
+- After approval, GREEN is uncommented and becomes live
 
 ### Network Configuration
 
 All containers run on `myfinance-network` (external network):
 - Backend containers connect to this network
 - Nginx connects to this network
+- Jenkins connects to this network
 - Allows nginx to route to backend containers by name
+
+**Important:** The network must be created before starting Jenkins:
+```bash
+docker network create myfinance-network
+```
 
 ### Configuration Synchronization
 
@@ -154,6 +178,12 @@ server myfinance-api-blue:80 max_fails=1 fail_timeout=10s;
 server myfinance-api-green:80 max_fails=1 fail_timeout=10s;
 ```
 
+**Initial state pattern (both commented):**
+```
+# server myfinance-api-blue:80 max_fails=1 fail_timeout=10s;
+# server myfinance-api-green:80 max_fails=1 fail_timeout=10s;
+```
+
 The health check parameters (`max_fails=1 fail_timeout=10s`) are required for:
 - Nginx failover detection
 - Sed pattern matching in switch script
@@ -162,9 +192,11 @@ The health check parameters (`max_fails=1 fail_timeout=10s`) are required for:
 ## Troubleshooting
 
 ### Nginx not starting
+- Nginx starts with Jenkins stack in `jenkins/docker`
 - Check nginx config syntax: `docker exec myfinance-nginx-proxy nginx -t`
 - Check logs: `docker logs myfinance-nginx-proxy`
 - Verify network exists: `docker network ls | grep myfinance`
+- If nginx failed to start, restart Jenkins stack: `cd jenkins/docker && docker-compose restart`
 
 ### Backend container not accessible
 - Check container is running: `docker ps | grep myfinance-api`
@@ -185,11 +217,17 @@ The health check parameters (`max_fails=1 fail_timeout=10s`) are required for:
 
 ### Update Backend Code
 
-Simply trigger a new Jenkins build with a new tag:
-1. Push code changes to GitHub with new tag
-2. Run Backend-Release job with new TAG
-3. Pipeline automatically deploys to inactive environment
-4. Approve traffic switch when ready
+Simply trigger a new Jenkins build:
+1. Push code changes to GitHub `staging` branch
+2. Navigate to MyFinance folder → Backend-Release job
+3. Click "Build with Parameters"
+4. Enter RELEASE_NUMBER or leave empty for auto-generation
+5. Pipeline automatically:
+   - Builds and tests the code
+   - Deploys to inactive environment
+   - Merges to production branch
+   - Creates release tag
+6. Approve traffic switch when ready
 
 ### View Nginx Logs
 
@@ -208,11 +246,11 @@ docker ps -a | grep myfinance | awk '{print $1}' | xargs docker rm
 ### Backup Database
 
 ```bash
-# Backup BLUE database
-docker cp myfinance-api-blue:/app/finance_blue.db ./backup/finance_blue_$(date +%Y%m%d).db
+# Backup BLUE database (SQLite)
+docker cp myfinance-api-blue:/data/finance_blue.db ./backup/finance_blue_$(date +%Y%m%d).db
 
-# Backup GREEN database
-docker cp myfinance-api-green:/app/finance_green.db ./backup/finance_green_$(date +%Y%m%d).db
+# Backup GREEN database (SQLite)
+docker cp myfinance-api-green:/data/finance_green.db ./backup/finance_green_$(date +%Y%m%d).db
 ```
 
 ## Next Steps
