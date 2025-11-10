@@ -90,20 +90,16 @@ check_frontend_health() {
         return 1
     fi
     
-    # Check main page
-    CLIENT_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$CLIENT_PORT/" || echo "000")
+    # Check main page using container name (cross-network access from Jenkins)
+    CLIENT_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "http://${CLIENT_CONTAINER}:80/" 2>/dev/null || echo "000")
     
     if [[ "$CLIENT_HEALTH" != "200" ]]; then
         echo "❌ Frontend health check failed - HTTP $CLIENT_HEALTH"
         return 1
     fi
     
-    # Check if static assets are loading
-    ASSETS_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$CLIENT_PORT/static/css/" || echo "000")
-    
     echo "✅ Frontend health check passed"
     echo "   - Main page: $CLIENT_HEALTH"
-    echo "   - Assets availability: $ASSETS_CHECK"
     return 0
 }
 

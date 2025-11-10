@@ -109,33 +109,90 @@ export NGINX_UPSTREAM="$TARGET_ENV"
 
 # Verify the switch
 echo "Verifying traffic switch..."
-echo "Waiting for backend to be ready..."
 
-# Wait for backend to actually respond (retry logic)
-MAX_RETRIES=12
-RETRY_COUNT=0
-BACKEND_READY=false
-
-while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
-    sleep 5
+# Only check backend if we're switching API traffic
+if [[ "$SERVICE" == "api" || "$SERVICE" == "both" ]]; then
+    echo "Waiting for backend to be ready..."
     
-    # Try to connect to the backend container directly by name (both containers on myfinance-network)
-    BACKEND_CONTAINER="myfinance-api-${TARGET_ENV}"
+    # Wait for backend to actually respond (retry logic)
+    MAX_RETRIES=12
+    RETRY_COUNT=0
+    BACKEND_READY=false
     
-    DIRECT_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://${BACKEND_CONTAINER}:80/health" 2>/dev/null || echo "000")
+    while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
+        sleep 5
+        
+        # Try to connect to the backend container directly by name (both containers on myfinance-network)
+        BACKEND_CONTAINER="myfinance-api-${TARGET_ENV}"
+        
+        DIRECT_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://${BACKEND_CONTAINER}:80/health" 2>/dev/null || echo "000")
+        
+        if [[ "$DIRECT_HEALTH" == "200" ]]; then
+            echo "✅ Backend $TARGET_ENV is responding (attempt $((RETRY_COUNT + 1)))"
+            BACKEND_READY=true
+            break
+        else
+            echo "⏳ Waiting for backend $TARGET_ENV to be ready... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES, status: $DIRECT_HEALTH)"
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+        fi
+    done
     
-    if [[ "$DIRECT_HEALTH" == "200" ]]; then
-        echo "✅ Backend $TARGET_ENV is responding (attempt $((RETRY_COUNT + 1)))"
-        BACKEND_READY=true
-        break
-    else
-        echo "⏳ Waiting for backend $TARGET_ENV to be ready... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES, status: $DIRECT_HEALTH)"
-        RETRY_COUNT=$((RETRY_COUNT + 1))
+    if [[ "$BACKEND_READY" != "true" ]]; then
+        echo "❌ Backend $TARGET_ENV did not become healthy in time"
+        echo "Restoring previous nginx configuration..."
+        cp "$NGINX_BACKUP" "$NGINX_CONFIG"
+        docker cp "$NGINX_BACKUP" myfinance-nginx-proxy:/etc/nginx/conf.d/default.conf
+        docker exec myfinance-nginx-proxy nginx -s reload
+        exit 1
     fi
-done
+fi
 
-if [[ "$BACKEND_READY" != "true" ]]; then
-    echo "❌ Backend $TARGET_ENV did not become healthy in time"
+# Now test through nginx
+
+# Test health endpoints by curling from inside the nginx container itself
+# This ensures we're testing the actual nginx routing
+API_HEALTH="000"
+if [[ "$SERVICE" == "api" || "$SERVICE" == "both" ]]; then
+    echo "Testing API health endpoint..."
+    API_HEALTH=$(docker exec myfinance-nginx-proxy curl -s -o /dev/null -w "%{http_code}" --max-time 10 http://localhost/health 2>/dev/null || echo "000")
+    echo "API Health Response: $API_HEALTH"
+fi
+
+# Check if client is deployed (frontend) - check if any client server line is active (not commented)
+CLIENT_HEALTH="000"
+CLIENT_DEPLOYED=false
+if [[ "$SERVICE" == "client" || "$SERVICE" == "both" ]]; then
+    if grep -q "^\s*server myfinance-client-.*:80;" "$NGINX_CONFIG"; then
+        echo "Testing Client health endpoint..."
+        # Use Host header to ensure we hit the client server, not API server
+        CLIENT_HEALTH=$(docker exec myfinance-nginx-proxy curl -s -o /dev/null -w "%{http_code}" --max-time 10 -H "Host: myfinance.local" http://localhost/ 2>/dev/null || echo "000")
+        echo "Client Health Response: $CLIENT_HEALTH"
+        CLIENT_DEPLOYED=true
+    else
+        echo "Client: Not deployed (all client servers commented out)"
+    fi
+fi
+
+# Verify health checks based on what we're switching
+HEALTH_CHECK_FAILED=false
+
+if [[ "$SERVICE" == "api" || "$SERVICE" == "both" ]]; then
+    if [[ "$API_HEALTH" != "200" ]]; then
+        echo "❌ API health check failed after switching to $TARGET_ENV"
+        echo "API Health: $API_HEALTH (expected 200)"
+        HEALTH_CHECK_FAILED=true
+    fi
+fi
+
+if [[ "$SERVICE" == "client" || "$SERVICE" == "both" ]]; then
+    if [[ "$CLIENT_DEPLOYED" == "true" && "$CLIENT_HEALTH" != "200" ]]; then
+        echo "❌ Client health check failed after switching to $TARGET_ENV"
+        echo "Client Health: $CLIENT_HEALTH (expected 200)"
+        HEALTH_CHECK_FAILED=true
+    fi
+fi
+
+if [[ "$HEALTH_CHECK_FAILED" == "true" ]]; then
     echo "Restoring previous nginx configuration..."
     cp "$NGINX_BACKUP" "$NGINX_CONFIG"
     docker cp "$NGINX_BACKUP" myfinance-nginx-proxy:/etc/nginx/conf.d/default.conf
@@ -143,93 +200,48 @@ if [[ "$BACKEND_READY" != "true" ]]; then
     exit 1
 fi
 
-# Now test through nginx
-
-# Test health endpoints by curling from inside the nginx container itself
-# This ensures we're testing the actual nginx routing
-echo "Testing API health endpoint..."
-API_HEALTH=$(docker exec myfinance-nginx-proxy curl -s -o /dev/null -w "%{http_code}" --max-time 10 http://localhost/health 2>/dev/null || echo "000")
-echo "API Health Response: $API_HEALTH"
-
-# Check if client is deployed (frontend) - check if any client server line is active (not commented)
-CLIENT_DEPLOYED=false
-if grep -q "^\s*server myfinance-client-.*:80;" "$NGINX_CONFIG"; then
-    echo "Testing Client health endpoint..."
-    CLIENT_HEALTH=$(docker exec myfinance-nginx-proxy curl -s -o /dev/null -w "%{http_code}" --max-time 10 http://localhost/ 2>/dev/null || echo "000")
-    echo "Client Health Response: $CLIENT_HEALTH"
-    CLIENT_DEPLOYED=true
-else
-    echo "Client: Not deployed (all client servers commented out)"
-fi
-
-# Verify health checks
-if [[ "$API_HEALTH" == "200" ]]; then
-    if [[ "$CLIENT_DEPLOYED" == "true" && "$CLIENT_HEALTH" != "200" ]]; then
-        echo "❌ Client health check failed after switching to $TARGET_ENV"
-        echo "API Health: $API_HEALTH"
-        echo "Client Health: $CLIENT_HEALTH"
-        
-        # Restore backup
-        echo "Restoring previous nginx configuration..."
-        cp "$NGINX_BACKUP" "$NGINX_CONFIG"
-        docker exec myfinance-nginx-proxy nginx -s reload
-        exit 1
-    fi
-    
-    echo "✅ Traffic successfully switched to $TARGET_ENV environment"
+echo "✅ Traffic successfully switched to $TARGET_ENV environment"
+if [[ "$SERVICE" == "api" || "$SERVICE" == "both" ]]; then
     echo "API Health: $API_HEALTH"
+fi
+if [[ "$SERVICE" == "client" || "$SERVICE" == "both" ]]; then
     if [[ "$CLIENT_DEPLOYED" == "true" ]]; then
         echo "Client Health: $CLIENT_HEALTH"
     else
         echo "Client: Not deployed (skipped)"
     fi
-    
-    # Log the switch
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - Traffic switched to $TARGET_ENV" >> "$PROJECT_ROOT/logs/traffic-switch.log"
-    
-    # Update current environment file
-    echo "$TARGET_ENV" > "$PROJECT_ROOT/current-environment.txt"
-    
-    # Stop the inactive environment to save resources
-    INACTIVE_ENV=""
-    if [[ "$TARGET_ENV" == "blue" ]]; then
-        INACTIVE_ENV="green"
-    else
-        INACTIVE_ENV="blue"
-    fi
-    
-    echo "Stopping inactive $INACTIVE_ENV environment containers..."
-    
-    # Stop API container
+fi
+
+# Log the switch
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Traffic switched to $TARGET_ENV" >> "$PROJECT_ROOT/logs/traffic-switch.log"
+
+# Update current environment file
+echo "$TARGET_ENV" > "$PROJECT_ROOT/current-environment.txt"
+
+# Stop the inactive environment to save resources
+INACTIVE_ENV=""
+if [[ "$TARGET_ENV" == "blue" ]]; then
+    INACTIVE_ENV="green"
+else
+    INACTIVE_ENV="blue"
+fi
+
+echo "Stopping inactive $INACTIVE_ENV environment containers..."
+
+# Stop API container if we switched API
+if [[ "$SERVICE" == "api" || "$SERVICE" == "both" ]]; then
     if docker ps | grep -q "myfinance-api-$INACTIVE_ENV"; then
         docker stop "myfinance-api-$INACTIVE_ENV"
         echo "✅ Stopped myfinance-api-$INACTIVE_ENV"
     fi
-    
-    # Stop client container if it exists
+fi
+
+# Stop client container if we switched client
+if [[ "$SERVICE" == "client" || "$SERVICE" == "both" ]]; then
     if docker ps | grep -q "myfinance-client-$INACTIVE_ENV"; then
         docker stop "myfinance-client-$INACTIVE_ENV"
         echo "✅ Stopped myfinance-client-$INACTIVE_ENV"
     fi
-    
-    exit 0
-else
-    echo "❌ API health check failed after switching to $TARGET_ENV"
-    echo "API Health: $API_HEALTH (expected 200)"
-    
-    if [[ "$API_HEALTH" == "000" ]]; then
-        echo "⚠️  Connection failed - nginx may not be routing correctly or backend is unreachable"
-        echo "Debugging information:"
-        echo "- Check if nginx is running: docker ps | grep nginx"
-        echo "- Check nginx logs: docker logs myfinance-nginx-proxy"
-        echo "- Check backend container: docker ps | grep myfinance-api-$TARGET_ENV"
-        echo "- Test direct backend: curl http://localhost:500$([[ $TARGET_ENV == 'blue' ]] && echo 1 || echo 2)/health"
-    fi
-    
-    # Restore backup
-    echo "Restoring previous nginx configuration..."
-    cp "$NGINX_BACKUP" "$NGINX_CONFIG"
-    docker exec myfinance-nginx-proxy nginx -s reload
-    
-    exit 1
 fi
+
+exit 0
