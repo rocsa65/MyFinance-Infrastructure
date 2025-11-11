@@ -787,7 +787,7 @@ docker cp myfinance-api-green:/data/finance_green.db backup\
 
 ### Key URLs
 
-- **Jenkins:** http://localhost:8081 (admin/admin)
+- **Jenkins:** http://localhost:8081 (admin/admin123)
 - **API Health:** http://localhost/health
 - **Frontend:** http://localhost/ (Host: myfinance.local)
 - **GitHub Packages:** https://github.com/rocsa65?tab=packages
@@ -841,7 +841,6 @@ docker cp myfinance-api-green:/data/finance_green.db backup\
 
 - **QUICK-REFERENCE.md:** Cheat sheet of common commands
 - **docs/blue-green-flow.md:** Blue-green deployment flow diagrams
-- **docs/cicd-architecture.md:** CI/CD architecture overview
-- **scripts/README.md:** Script documentation
+- **docs/script-flow.md:** Script execution flow and pipeline details
 
 For issues, check the [Troubleshooting](#troubleshooting) section above.

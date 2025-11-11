@@ -185,11 +185,13 @@ docker exec myfinance-jenkins curl http://myfinance-api-green:80/health
 
 ## File Locations
 
-- **Jenkins pipelines**: `jenkins/pipelines/`
+- **Jenkins pipelines**: `jenkins/pipelines/` (backend-release.groovy, frontend-release.groovy)
 - **Nginx config**: `docker/nginx/blue-green.conf`
 - **Docker compose**: `jenkins/docker/docker-compose.yml`
-- **Deployment scripts**: `scripts/deployment/`
-- **Database backups**: `backup/`
+- **Deployment scripts**: `scripts/deployment/` (deploy-backend.sh, deploy-frontend.sh, blue-green-switch.sh)
+- **Monitoring scripts**: `scripts/monitoring/` (health-check.sh, integration-test.sh, etc.)
+- **Database scripts**: `scripts/database/` (migrate.sh)
+- **Documentation**: `docs/` (blue-green-flow.md, script-flow.md)
 
 ## Blue-Green Workflow (Jenkins)
 

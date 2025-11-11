@@ -10,16 +10,13 @@ MyFinance-Infrastructure/
 │   ├── blue-green/             # Blue-green deployment configurations
 │   └── nginx/                  # nginx proxy configurations
 ├── jenkins/                    # Jenkins CI/CD configurations
-│   ├── pipelines/              # Pipeline scripts
+│   ├── pipelines/              # Pipeline scripts (backend-release, frontend-release)
 │   └── docker/                 # Jenkins container setup
 ├── scripts/                    # Automation scripts
-│   ├── database/               # Database management scripts
-│   ├── deployment/             # Deployment automation
+│   ├── database/               # Database management scripts (migrate.sh)
+│   ├── deployment/             # Deployment automation (deploy-backend, deploy-frontend, blue-green-switch)
 │   └── monitoring/             # Health check and monitoring scripts
-├── monitoring/                 # Monitoring and observability
-│   ├── prometheus/            # Prometheus configuration
-│   └── grafana/               # Grafana dashboards
-└── docs/                       # Documentation files
+└── docs/                       # Documentation files (blue-green-flow.md, script-flow.md)
 ```
 
 ## 🚀 Getting Started
@@ -61,8 +58,9 @@ MyFinance-Infrastructure/
    ```
 
 3. **Access Jenkins**
-   - URL: http://localhost:8080
-   - Initial admin password: Check `jenkins/docker/secrets/initialAdminPassword`
+   - URL: http://localhost:8081
+   - Username: `admin`
+   - Password: `admin123`
 
 ## 🔄 Blue-Green Deployment
 
@@ -116,10 +114,10 @@ This infrastructure supports blue-green deployment strategy:
 
 ## 📊 Monitoring
 
-- Health checks every 30 seconds
-- Application metrics via Prometheus
-- Visualization via Grafana
+- Health checks every 30 seconds during deployment
 - Automated rollback on health check failures
+- Container-to-container health verification from Jenkins
+- nginx traffic routing with zero-downtime switching
 
 ## 🔧 Configuration
 
@@ -137,17 +135,36 @@ Key values:
 
 ### Switch Traffic (Manual)
 ```bash
-./scripts/deployment/blue-green-switch.sh green
+# Switch both API and client to green environment
+./scripts/deployment/blue-green-switch.sh green both
+
+# Switch only API
+./scripts/deployment/blue-green-switch.sh green api
+
+# Switch only client
+./scripts/deployment/blue-green-switch.sh green client
 ```
 
 ### Rollback (Emergency)
 ```bash
+# Rollback both services to blue environment
 ./scripts/deployment/blue-green-switch.sh blue both
+
+# Rollback only API
+./scripts/deployment/blue-green-switch.sh blue api
+
+# Rollback only client
+./scripts/deployment/blue-green-switch.sh blue client
 ```
 
-### Database Backup
+### Database Operations
 ```bash
-./scripts/database/backup.sh production
+# Run database migrations
+./scripts/database/migrate.sh green
+
+# Backup database manually
+docker cp myfinance-api-green:/data/finance_green.db backup/
+docker cp myfinance-api-blue:/data/finance_blue.db backup/
 ```
 
 ## 🤝 Contributing

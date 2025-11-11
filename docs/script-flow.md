@@ -1,37 +1,25 @@
 # Script Execution Flow
 
 ## Overview
-The MyFinance deployment system provides three entry points in Jenkins:
+The MyFinance deployment system provides two main Jenkins jobs:
 
 1. **MyFinance/Backend-Release** - Deploy backend only
 2. **MyFinance/Frontend-Release** - Deploy frontend only
-3. **MyFinance/Full-Release** - Orchestrator with choice: frontend, backend, or both
+
+Each job operates independently and can be triggered separately for granular control over deployments.
 
 ## 1. Release Pipeline Trigger (Jenkins)
 
-### Option A: Individual Component Release
+### Backend Release
 ```bash
-# Backend only:
+# Backend deployment pipeline:
 /var/jenkins_home/pipelines/backend-release.groovy
-
-# Frontend only:
-/var/jenkins_home/pipelines/frontend-release.groovy
 ```
 
-### Option B: Orchestrated Release (Full-Release Job)
+### Frontend Release
 ```bash
-# Main orchestrator with parameters:
-/var/jenkins_home/Jenkinsfile
-
-# Parameters:
-# - RELEASE_TYPE: frontend | backend | full
-# - SKIP_TESTS: false (default)
-# - AUTO_DEPLOY: false (default)
-
-# What happens:
-# ├── If RELEASE_TYPE = 'frontend' → Triggers Frontend-Release job
-# ├── If RELEASE_TYPE = 'backend' → Triggers Backend-Release job
-# └── If RELEASE_TYPE = 'full' → Triggers both + full system tests
+# Frontend deployment pipeline:
+/var/jenkins_home/pipelines/frontend-release.groovy
 ```
 
 ## 2. Backend Deployment Flow
@@ -217,80 +205,10 @@ docker push ghcr.io/rocsa65/myfinance-client:latest
 ./scripts/deployment/blue-green-switch.sh <previous_env> client
 
 # Restores traffic to previous environment
+# Sends rollback notification via notify-rollback.sh
 ```
 
-## 4. Full Release Flow (Orchestrator)
-
-When using **MyFinance/Full-Release** job with `RELEASE_TYPE = 'full'`:
-
-### Stage 1: Setup
-```bash
-# Generate unique release number: v20251111-044054-2
-# Display release type and number
-```
-
-### Stage 2: Frontend Release
-```bash
-# Triggers MyFinance/Frontend-Release job
-# Passes RELEASE_NUMBER and SKIP_TESTS parameters
-# Waits for completion
-```
-
-### Stage 3: Backend Release
-```bash
-# Triggers MyFinance/Backend-Release job
-# Passes RELEASE_NUMBER and SKIP_TESTS parameters
-# Waits for completion
-```
-
-### Stage 4: Full System Test
-```bash
-# Only runs for 'full' deployments
-./scripts/monitoring/system-health-check.sh green
-
-# Tests entire system integration
-# Verifies frontend-backend communication
-```
-
-### Stage 5: Production Deployment
-```bash
-# If AUTO_DEPLOY = true → proceeds automatically
-# Otherwise → waits for manual approval
-
-./scripts/deployment/blue-green-switch.sh green
-
-# Switches both frontend and backend traffic
-```
-
-### Stage 6: Production Monitoring
-```bash
-./scripts/monitoring/production-monitor.sh 600
-
-# Monitors for 10 minutes (600 seconds)
-# Runs health checks every 30 seconds
-# Triggers rollback on 3 consecutive failures
-```
-
-### Stage 7: Post-Deployment Verification
-```bash
-./scripts/monitoring/post-deployment-check.sh
-
-# Final verification checks
-# Send success notification
-./scripts/monitoring/notify-release.sh success v20251111-044054-2
-```
-
-### Post-Build: Emergency Rollback
-```bash
-# On failure:
-./scripts/deployment/emergency-rollback.sh
-./scripts/monitoring/notify-release.sh failure v20251111-044054-2
-
-# On success:
-./scripts/deployment/cleanup.sh
-```
-
-## 5. Key Jenkins Configuration
+## 4. Key Jenkins Configuration
 
 ### Jenkins Jobs (Auto-created via init.groovy.d)
 ```groovy
@@ -298,8 +216,7 @@ When using **MyFinance/Full-Release** job with `RELEASE_TYPE = 'full'`:
 
 MyFinance/
 ├── Backend-Release     # Uses: pipelines/backend-release.groovy
-├── Frontend-Release    # Uses: pipelines/frontend-release.groovy
-└── Full-Release        # Uses: Jenkinsfile (orchestrator)
+└── Frontend-Release    # Uses: pipelines/frontend-release.groovy
 ```
 
 ### Required Jenkins Credentials
@@ -320,7 +237,7 @@ TARGET_ENV=blue|green  # Auto-detected
 CURRENT_ENV=blue|green|none  # Auto-detected
 ```
 
-## 6. Blue-Green Deployment Strategy
+## 5. Blue-Green Deployment Strategy
 
 ### How Target Environment is Determined
 ```bash
@@ -357,7 +274,7 @@ CURRENT_ENV=blue|green|none  # Auto-detected
 # Previous environment remains running during deployment
 ```
 
-## 7. Monitoring & Notifications
+## 6. Monitoring & Notifications
 
 ### Health Check Endpoints
 ```bash
@@ -371,12 +288,11 @@ CURRENT_ENV=blue|green|none  # Auto-detected
 
 ### Notification Scripts
 ```bash
-./scripts/monitoring/notify-release.sh <status> <release_number>
 ./scripts/monitoring/notify-failure.sh <component> <release_number>
 ./scripts/monitoring/notify-rollback.sh <env> <status>
 ```
 
-## 8. Release Number Format
+## 7. Release Number Format
 
 ```bash
 # Format: v<yyyyMMdd-HHmmss>-<jenkins_build_number>

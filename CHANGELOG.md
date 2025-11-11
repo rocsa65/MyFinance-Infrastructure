@@ -10,10 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial infrastructure repository setup
 - Docker configurations for blue-green deployment
-- Jenkins pipeline configurations
-- Deployment automation scripts
-- Monitoring and health check setup
-- Environment-specific configurations
+- Jenkins CI/CD pipelines for backend and frontend (separate deployments)
+- Automated deployment scripts (deploy-backend.sh, deploy-frontend.sh, blue-green-switch.sh)
+- Database migration automation (migrate.sh)
+- Health check and monitoring scripts
+- Integration test automation
+- Automatic rollback on deployment failures
+- nginx reverse proxy configuration with blue-green support
+- Comprehensive documentation (DEPLOYMENT-GUIDE.md, QUICK-REFERENCE.md, blue-green-flow.md, script-flow.md)
+- Jenkins Docker setup with automated job creation
+- GitHub Container Registry integration
+- SQLite database support with independent databases per environment
 
 ### Changed
 
@@ -24,9 +31,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 ### Security
-
-## [0.1.0] - 2025-11-08
-
-### Added
-- Initial release of MyFinance Infrastructure repository
-- Basic folder structure and documentation
