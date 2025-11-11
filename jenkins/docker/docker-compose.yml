@@ -13,6 +13,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./secrets:/var/jenkins_home/secrets
       - ../pipelines:/var/jenkins_home/pipelines
+      - ../Jenkinsfile:/var/jenkins_home/Jenkinsfile
       - ../../scripts:/var/jenkins_home/scripts
       - ../../environments:/var/jenkins_home/environments
       - ../../docker:/var/jenkins_home/docker

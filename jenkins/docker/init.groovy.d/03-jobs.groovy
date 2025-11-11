@@ -24,6 +24,14 @@ def backendScript = new File('/var/jenkins_home/pipelines/backend-release.groovy
 def backendDefinition = new CpsFlowDefinition(backendScript, true)
 backendJob.setDefinition(backendDefinition)
 
+// Full Release Pipeline - orchestrator with RELEASE_TYPE parameter
+def fullReleaseJob = folder.createProject(WorkflowJob.class, "Full-Release")
+fullReleaseJob.setDescription("MyFinance Full Release Pipeline - Deploy Frontend, Backend, or Both")
+
+def fullReleaseScript = new File('/var/jenkins_home/Jenkinsfile').text
+def fullReleaseDefinition = new CpsFlowDefinition(fullReleaseScript, true)
+fullReleaseJob.setDefinition(fullReleaseDefinition)
+
 instance.save()
 
 println "Jenkins jobs configured from local pipeline files"

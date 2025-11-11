@@ -35,7 +35,8 @@ services:
     environment:
       - ENVIRONMENT_COLOR=green
       - RELEASE_NUMBER=${GREEN_RELEASE_NUMBER}
-      - REACT_APP_API_URL=http://myfinance-api-green
+      - VITE_API_URL=/api
+      - REACT_APP_API_URL=/api
     networks:
       - myfinance-network
     healthcheck:
