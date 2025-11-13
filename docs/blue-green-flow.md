@@ -136,10 +136,12 @@ Internet Traffic
 - Health checks before traffic switch
 
 **Database Handling:**
-- SQLite databases are independent per environment
-- Each container has its own /data/finance_*.db file
-- Migrations run automatically during deployment
-- No database replication needed between blue/green
+- SQLite shared database across both environments
+- Both blue and green containers use the same `/data/myfinance.db` file
+- Database persists across all blue-green switches
+- Migrations must be backward compatible for rollback support
+- Automatic migrations on container startup
+- See [Database Architecture](database-architecture.md) for details
 
 **Service-Specific Switching:**
 - Backend and frontend can be deployed independently

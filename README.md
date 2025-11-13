@@ -13,10 +13,18 @@ MyFinance-Infrastructure/
 │   ├── pipelines/              # Pipeline scripts (backend-release, frontend-release)
 │   └── docker/                 # Jenkins container setup
 ├── scripts/                    # Automation scripts
-│   ├── database/               # Database management scripts (migrate.sh)
+│   ├── database/               # Database backup/restore scripts
 │   ├── deployment/             # Deployment automation (deploy-backend, deploy-frontend, blue-green-switch)
 │   └── monitoring/             # Health check and monitoring scripts
-└── docs/                       # Documentation files (blue-green-flow.md, script-flow.md)
+├── docs/                       # Documentation files
+│   ├── blue-green-flow.md      # Blue-green deployment flow diagrams
+│   ├── script-flow.md          # Script execution flow
+│   ├── database-architecture.md # Database architecture guide
+│   └── database-diagram.md     # Database visual diagrams
+├── DATABASE-QUICK-REF.md       # Database operations quick reference
+├── DATABASE-IMPLEMENTATION.md  # Database implementation summary
+├── DEPLOYMENT-GUIDE.md         # Complete deployment guide
+└── QUICK-REFERENCE.md          # Command quick reference
 ```
 
 ## 🚀 Getting Started
@@ -35,6 +43,11 @@ MyFinance-Infrastructure/
    - All commands in one place
    - For experienced users
 
+3. **🗄️ Database Operations?**
+   - Quick ref: [`DATABASE-QUICK-REF.md`](DATABASE-QUICK-REF.md)
+   - Architecture: [`docs/database-architecture.md`](docs/database-architecture.md)
+   - Backup/restore procedures and troubleshooting
+
 ### Prerequisites
 
 - Docker Desktop
@@ -45,91 +58,125 @@ MyFinance-Infrastructure/
 
 ### Quick Setup
 
-1. **Clone the infrastructure repository**
+1. **Create Docker network**
    ```bash
-   git clone https://github.com/rocsa65/MyFinance-Infrastructure.git
-   cd MyFinance-Infrastructure
+   docker network create myfinance-network
    ```
 
-2. **Start Jenkins container**
+2. **Start Jenkins and Nginx infrastructure**
    ```bash
    cd jenkins/docker
    docker-compose up -d
+   cd ../..
    ```
 
-3. **Access Jenkins**
+3. **Copy nginx configuration**
+   ```bash
+   docker cp docker/nginx/blue-green.conf myfinance-nginx-proxy:/etc/nginx/conf.d/default.conf
+   docker exec myfinance-nginx-proxy nginx -s reload
+   ```
+
+4. **Access Jenkins**
    - URL: http://localhost:8081
    - Username: `admin`
    - Password: `admin123`
 
+5. **Configure GitHub token in Jenkins**
+   - Navigate to: Manage Jenkins → Credentials → System → Global credentials
+   - Add credential with ID: `github-token`
+   - Use your GitHub Personal Access Token with `write:packages` scope
+
+6. **Deploy application**
+   - Run Backend-Release job in Jenkins
+   - Run Frontend-Release job in Jenkins
+   - See [`DEPLOYMENT-GUIDE.md`](DEPLOYMENT-GUIDE.md) for detailed steps
+
 ## 🔄 Blue-Green Deployment
 
-This infrastructure supports blue-green deployment strategy:
+This infrastructure implements a blue-green deployment strategy with a **shared database architecture**:
 
-- **Blue Environment**: Currently active production environment
-- **Green Environment**: New deployment target for testing before switching
+- **Blue Environment**: One of two identical production environments
+- **Green Environment**: The other production environment
 - **nginx Proxy**: Routes traffic between blue and green environments
+- **Shared Database**: Both environments use the same SQLite database (`myfinance.db`)
+- **Zero Downtime**: Instant traffic switching with no data loss
+
+### Key Features
+
+- **Data Persistence**: Shared database ensures data survives all deployments
+- **Instant Rollback**: Switch back to previous environment immediately
+- **Backward Compatible Migrations**: Database changes support both environments
+- **Automated Backups**: Scripts for database backup before deployments
 
 ### Deployment Process
 
-1. Deploy to green environment
-2. Run health checks and integration tests
-3. Switch traffic from blue to green
-4. Monitor for 10 minutes
-5. If issues detected, rollback to blue
+1. Jenkins detects which environment is active
+2. Deploy new version to inactive environment
+3. Run health checks and integration tests
+4. Database migrations applied automatically (if any)
+5. Switch traffic to new environment via nginx
+6. Monitor for issues
+7. Previous environment kept as instant rollback option
 
 ## 📋 Pipeline Overview
 
 ### Frontend Pipeline
-- Pull from staging branch
-- Run unit tests
-- Run integration tests
-- Run UI tests (Cypress)
+- Checkout staging branch from `rocsa65/client`
+- Run tests (if enabled)
 - Build Docker image
-- Push to GitHub Packages
-- Deploy to green environment
+- Push to GitHub Container Registry (ghcr.io)
+- Detect active environment
+- Deploy to inactive environment
 - Run health checks
-- Switch traffic if successful
+- Switch traffic (if auto-switch enabled)
+- Stop previous environment
 
 ### Backend Pipeline
-- Pull from staging branch
-- Run unit tests
-- Run integration tests
-- Run API health checks
+- Checkout staging branch from `rocsa65/MyFinance`
+- Run tests (if enabled)
 - Build Docker image
-- Push to GitHub Packages
-- Deploy to green environment
-- Run database migrations
+- Push to GitHub Container Registry (ghcr.io)
+- Detect active environment
+- Deploy to inactive environment
+- Database migrations run automatically on container start
 - Run health checks
-- Switch traffic if successful
+- Switch traffic (if auto-switch enabled)
+- Stop previous environment
 
 ## 🗃️ Database Management
 
-- **All Environments**: SQLite (file-based, embedded in API containers)
-- **Blue Environment**: `/data/finance_blue.db` (SQLite database file)
-- **Green Environment**: `/data/finance_green.db` (SQLite database file)
+- **Database Type**: SQLite (file-based, embedded in API containers)
+- **Shared Database**: Both blue and green environments use the same database file
+- **Database File**: `/data/myfinance.db` (shared across both environments)
+- **Volume**: `shared_api_data` (mounted by both blue and green containers)
 - **Migration**: Automated through Entity Framework Core migrations
-- **Replication**: File-based copying between blue and green environments
-- **Backup**: SQLite database files are backed up before migrations and deployments
+- **Data Persistence**: Data persists across all blue-green deployments
+- **Backup**: Use provided scripts to backup before major deployments
 
-## 📊 Monitoring
+**Important:** Since both environments share the same database, database migrations must be backward compatible to support rollback scenarios. See [`docs/database-architecture.md`](docs/database-architecture.md) for details.
 
-- Health checks every 30 seconds during deployment
-- Automated rollback on health check failures
-- Container-to-container health verification from Jenkins
-- nginx traffic routing with zero-downtime switching
+## 📊 Monitoring & Health Checks
+
+- **Health Endpoints**: `/health` for API health checks
+- **Container Health**: Docker healthcheck in compose files
+- **Nginx Status**: Traffic routing verification
+- **Database Connectivity**: Verified during deployment
+- **Automated Rollback**: On health check failures (if traffic already switched)
+- **Manual Verification**: Integration tests via scripts
 
 ## 🔧 Configuration
 
-All configuration is handled through:
+All configuration is managed through:
 - **Jenkins Environment Variables**: Set in pipeline `environment` blocks
-- **Docker Compose Files**: Environment-specific settings in blue/green compose files
+- **Docker Compose Files**: Environment-specific settings in `docker/blue-green/`
 - **Jenkins Credentials**: Secure secrets managed through Jenkins credentials store
+- **Nginx Configuration**: `docker/nginx/blue-green.conf`
 
-Key values:
-- `DOCKER_REGISTRY`: `ghcr.io/rocsa65` (hardcoded in scripts)
-- `RELEASE_NUMBER`: Automatically generated by Jenkins pipelines
-- `GITHUB_PACKAGES_TOKEN`: Stored in Jenkins credentials (for pushing images)
+Key configuration values:
+- `DOCKER_REGISTRY`: `ghcr.io/rocsa65` (GitHub Container Registry)
+- `RELEASE_NUMBER`: Auto-generated by Jenkins (`vYYYYMMDD-HHMMSS-N`)
+- `GITHUB_TOKEN`: Stored in Jenkins credentials as `github-token`
+- `shared_api_data`: Docker volume for shared database
 
 ## 🛠️ Manual Operations
 
@@ -159,13 +206,31 @@ Key values:
 
 ### Database Operations
 ```bash
-# Run database migrations
-./scripts/database/migrate.sh green
+# Backup database before deployment
+./scripts/database/backup-db.sh    # Linux/macOS
+./scripts/database/backup-db.bat   # Windows
 
-# Backup database manually
-docker cp myfinance-api-green:/data/finance_green.db backup/
-docker cp myfinance-api-blue:/data/finance_blue.db backup/
+# Restore database if needed
+./scripts/database/restore-db.sh <backup-file>    # Linux/macOS
+./scripts/database/restore-db.bat <backup-file>   # Windows
+
+# Manual backup (alternative)
+docker cp myfinance-api-green:/data/myfinance.db backups/myfinance-$(date +%Y%m%d-%H%M%S).db
 ```
+
+**Note**: Both blue and green environments share the same database (`myfinance.db`). See [`DATABASE-QUICK-REF.md`](DATABASE-QUICK-REF.md) for complete database operations reference.
+
+## 📝 Additional Documentation
+
+- **[DEPLOYMENT-GUIDE.md](DEPLOYMENT-GUIDE.md)** - Complete deployment guide with troubleshooting
+- **[QUICK-REFERENCE.md](QUICK-REFERENCE.md)** - Command cheat sheet for daily operations
+- **[DATABASE-QUICK-REF.md](DATABASE-QUICK-REF.md)** - Database operations reference
+- **[DATABASE-IMPLEMENTATION.md](DATABASE-IMPLEMENTATION.md)** - Database architecture implementation
+- **[docs/database-architecture.md](docs/database-architecture.md)** - Complete database architecture guide
+- **[docs/database-diagram.md](docs/database-diagram.md)** - Visual database architecture diagrams
+- **[docs/blue-green-flow.md](docs/blue-green-flow.md)** - Blue-green deployment flow diagrams
+- **[docs/script-flow.md](docs/script-flow.md)** - Script execution flow documentation
+- **[CHANGELOG.md](CHANGELOG.md)** - Infrastructure change log
 
 ## 🤝 Contributing
 
@@ -173,9 +238,8 @@ docker cp myfinance-api-blue:/data/finance_blue.db backup/
 2. Make infrastructure changes
 3. Test in development environment
 4. Create pull request
-5. Deploy to staging for testing
-6. Merge to main after approval
+5. Review and merge to main
 
-## 📝 Release Notes
+## � License
 
-All infrastructure changes will be documented in [CHANGELOG.md](./CHANGELOG.md).
+This infrastructure is part of the MyFinance project.

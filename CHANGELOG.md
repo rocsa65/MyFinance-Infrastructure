@@ -9,18 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Initial infrastructure repository setup
-- Docker configurations for blue-green deployment
+- Docker configurations for blue-green deployment with shared database architecture
 - Jenkins CI/CD pipelines for backend and frontend (separate deployments)
 - Automated deployment scripts (deploy-backend.sh, deploy-frontend.sh, blue-green-switch.sh)
 - Database migration automation (migrate.sh)
+- Database backup and restore automation scripts (Linux and Windows)
 - Health check and monitoring scripts
 - Integration test automation
 - Automatic rollback on deployment failures
 - nginx reverse proxy configuration with blue-green support
-- Comprehensive documentation (DEPLOYMENT-GUIDE.md, QUICK-REFERENCE.md, blue-green-flow.md, script-flow.md)
+- Comprehensive documentation (DEPLOYMENT-GUIDE.md, QUICK-REFERENCE.md, blue-green-flow.md, script-flow.md, database-architecture.md)
 - Jenkins Docker setup with automated job creation
 - GitHub Container Registry integration
-- SQLite database support with independent databases per environment
+- SQLite database support with shared database for both blue and green environments
+- Shared data volume (`shared_api_data`) for persistent database across deployments
+- Database quick reference guide (DATABASE-QUICK-REF.md)
 
 ### Changed
 

@@ -96,6 +96,11 @@ Thumbs.db
 *.sqlite
 *.sqlite3
 
+# Database backups
+backups/
+backups/**/*.db
+backups/**/*.sqlite
+
 # Build artifacts
 dist/
 build/

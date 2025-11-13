@@ -34,13 +34,13 @@ if [[ "$TARGET_ENV" == "green" ]]; then
     COMPOSE_FILE="$PROJECT_ROOT/docker/blue-green/docker-compose.green.yml"
     API_CONTAINER_NAME="myfinance-api-green"
     API_SERVICE_NAME="myfinance-api-green"
-    DB_FILE="finance_green.db"
+    DB_FILE="myfinance.db"
 else
     export BLUE_RELEASE_NUMBER="$RELEASE_NUMBER"
     COMPOSE_FILE="$PROJECT_ROOT/docker/blue-green/docker-compose.blue.yml"
     API_CONTAINER_NAME="myfinance-api-blue"
     API_SERVICE_NAME="myfinance-api-blue"
-    DB_FILE="finance_blue.db"
+    DB_FILE="myfinance.db"
 fi
 
 # Create network if it doesn't exist

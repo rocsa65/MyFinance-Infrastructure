@@ -10,12 +10,12 @@ services:
       - "5001:80"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - ConnectionStrings__DefaultConnection=Data Source=/data/finance_blue.db
+      - ConnectionStrings__DefaultConnection=Data Source=/data/myfinance.db
       - ASPNETCORE_URLS=http://+:80
       - ENVIRONMENT_COLOR=blue
       - RELEASE_NUMBER=${BLUE_RELEASE_NUMBER}
     volumes:
-      - blue_api_data:/data
+      - shared_api_data:/data
       - blue_api_logs:/app/logs
     networks:
       - myfinance-network
@@ -49,7 +49,7 @@ services:
       - myfinance-api-blue
 
 volumes:
-  blue_api_data:
+  shared_api_data:
     driver: local
   blue_api_logs:
     driver: local
